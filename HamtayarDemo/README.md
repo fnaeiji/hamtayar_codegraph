@@ -114,3 +114,15 @@ For ERR_CONNECTION_RESET first check `http://127.0.0.1:8000/api/health`. The Chr
 The expanded-byte budget applies to selected entries, after excluding dependency/build directories (`node_modules`, `.git`, `.venv`, `vendor`, `dist`, `build`, `bin`, `obj`, `.vs`, `packages`), known binary/nested-archive extensions and files over MAX_SOURCE_FILE_MB. Every skipped file is listed with a reason; a skipped large source file is not analyzed. Actual bytes read remain bounded and checked against declared size. The archive entry-count limit still applies to all entries to bound metadata parsing.
 
 If selected source still exceeds MAX_EXPANDED_MB, the error identifies the file, selected bytes and allowed bytes. Adjust the relevant setting and restart the backend, then click **تلاش مجدد استخراج** on the failed project. This reuses the retained archive. Startup logs show effective limits. A failed archive with no remaining readable source reports that explicitly.
+
+### Indexing connection failures
+
+Indexing requires both the isolated staging Neo4j (default Bolt 7689) and the destination Neo4j (default Bolt 7687). From `HamtayarDemo`, run `docker compose up -d staging` and `docker compose ps`. This compose file starts only staging; start your existing destination separately. Set both passwords in local `.env` or Settings. Changing the staging password in `.env` does not reset credentials in an existing Docker volume; use the existing password or reset it through Neo4j administration, without deleting data.
+
+Use Settings → test destination and staging, or PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/connection/test | ConvertTo-Json -Depth 5
+```
+
+Both results must report `ok: true`. The index job now tests both before launching CGC and logs the failed target with actionable, credential-free errors. Retry Start index on the existing project; re-uploading is unnecessary. Graph and context require a successfully published index. A successful connection test alone does not validate full indexing or destination write permissions.

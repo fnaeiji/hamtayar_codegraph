@@ -52,7 +52,7 @@ def connection():
         try:
             graph.query('RETURN 1 AS ok',stage)
             results[name]={'ok':True}
-        except Exception as e: results[name]={'ok':False,'error':type(e).__name__}
+        except Exception as e: results[name]={'ok':False,'error':str(e) if isinstance(e,ValueError) else graph.connection_error(e,stage)}
     return results
 @app.get('/api/capabilities')
 def capabilities(): return manifest()

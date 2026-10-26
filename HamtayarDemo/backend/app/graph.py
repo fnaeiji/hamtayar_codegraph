@@ -2,10 +2,13 @@
 import hashlib
 import json
 from neo4j import GraphDatabase, Query
+from neo4j.exceptions import AuthError, ServiceUnavailable, SessionExpired, Neo4jError
+from urllib.parse import urlsplit
 from .config import setting
 
 class Graph:
     def __init__(self, staging=False):
+        self.staging = staging
         prefix = 'STAGING_' if staging else ''
         uri = setting(prefix+'NEO4J_URI', 'bolt://127.0.0.1:7689' if staging else 'bolt://127.0.0.1:7687')
         password = setting(prefix+'NEO4J_PASSWORD')
@@ -15,8 +18,32 @@ class Graph:
         try:
             with self.driver.session(database=self.database) as s:
                 return s.run(Query(query, timeout=15), **params).data()
+        except (ServiceUnavailable, SessionExpired, Neo4jError) as exc:
+            raise ValueError(connection_error(exc, self.staging)) from None
         finally:
             self.driver.close()
+
+def connection_error(exc, staging=False):
+    prefix = 'STAGING_' if staging else ''
+    role = 'staging (CGC temporary database)' if staging else 'destination (published graph)'
+    # Never interpolate exception text, URI credentials, query strings or passwords.
+    uri = setting(prefix+'NEO4J_URI', 'bolt://127.0.0.1:7689' if staging else 'bolt://127.0.0.1:7687')
+    try:
+        parsed = urlsplit(uri)
+        endpoint = f'{parsed.hostname}:{parsed.port or 7687}'
+    except ValueError:
+        endpoint = 'invalid URI'
+    label = f'Neo4j {role} [{endpoint}]'
+    if isinstance(exc, AuthError):
+        return f'{label}: authentication failed. Check {prefix}NEO4J_USERNAME and {prefix}NEO4J_PASSWORD. Changing .env does not reset an existing database password.'
+    if isinstance(exc, (ServiceUnavailable, SessionExpired)):
+        action = 'From HamtayarDemo run: docker compose up -d staging; docker compose ps. ' if staging else 'Start your destination Neo4j container and check its published Bolt port. '
+        return f'{label}: connection unavailable. {action}Check {prefix}NEO4J_URI and run the connection test again. Also check Docker logs and TLS settings if the port is reachable.'
+    code = getattr(exc, 'code', '') or ''
+    if code.endswith('DatabaseNotFound'):
+        return f'{label}: database not found. Check {prefix}NEO4J_DATABASE.'
+    return f'{label}: database operation failed. Check database availability, user permissions and server logs.'
+
 
 def query(text, staging=False, **params):
     return Graph(staging).run(text, **params)

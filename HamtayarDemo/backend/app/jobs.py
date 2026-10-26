@@ -84,7 +84,10 @@ class Jobs:
             host=lambda h:'loopback' if h in ('localhost','127.0.0.1','::1') else h
             if (host(a.hostname),a.port or 7687)==(host(b.hostname),b.port or 7687):
                 raise ValueError('Staging must use a separate Neo4j instance, not the destination')
-            graph.query('RETURN 1 AS ok',True)
+            for name, staging in [('staging', True), ('destination', False)]:
+                log(f'Checking Neo4j {name} connection...')
+                graph.query('RETURN 1 AS ok',staging)
+                log(f'Neo4j {name}: connection OK')
             store.update(pid,status='indexing')
             workspace=RUNTIME/'workspaces'/pid/'source'
             CGCAdapter().index(workspace,job,event,log)
@@ -98,6 +101,7 @@ class Jobs:
         except Exception as e:
             # Keep driver messages/credentials out of API errors.
             error=str(e) if isinstance(e,ValueError) else f'{type(e).__name__}: connection or processing failed; check local configuration'
+            log('Indexing failed: '+error)
             store.update(pid,status='cancelled' if event.is_set() else 'failed',error=error,finished_at=store.now())
         finally:
             with self.lock:
