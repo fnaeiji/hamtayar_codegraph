@@ -53,9 +53,11 @@ def read_rar(path, target, consume):
                         raise ValueError('Password-protected RAR archives are not supported')
                     if entry.volume or entry.flags & (rarfile.RAR_FILE_SPLIT_BEFORE | rarfile.RAR_FILE_SPLIT_AFTER):
                         raise ValueError('Multi-volume RAR archives are not supported; upload a single complete archive')
-                    if not entry.is_dir() and entry.compress_type != rarfile.RAR_M0 and not decoder['available']:
+                def open_entry(entry):
+                    if entry.compress_type != rarfile.RAR_M0 and not decoder['available']:
                         raise ValueError(MISSING_DECODER)
-                return consume(entries, lambda e: archive.open(e), target)
+                    return archive.open(entry)
+                return consume(entries, open_entry, target)
         except (rarfile.PasswordRequired, rarfile.RarWrongPassword) as exc:
             raise ValueError('Password-protected RAR archives are not supported') from exc
         except (rarfile.NeedFirstVolume, rarfile.NoRarEntry) as exc:

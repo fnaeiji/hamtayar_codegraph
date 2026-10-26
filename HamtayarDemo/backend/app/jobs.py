@@ -5,7 +5,7 @@ from . import archive, graph, store
 import shutil
 import zipfile
 from .cgc import CGCAdapter
-from .config import RUNTIME, setting
+from .config import RUNTIME, setting, MAX_EXPANDED, MAX_FILES, MAX_FILE
 
 class Jobs:
     def __init__(self):
@@ -29,6 +29,9 @@ class Jobs:
             self.pool.submit(self.run,pid,job,event)
     def extract(self, pid):
         with self.lock:
+            if pid in self.cancelled:
+                raise ValueError('Archive processing is already running')
+            store.update(pid, status='archive_queued', error=None)
             event = threading.Event()
             self.cancelled[pid] = event
             self.pool.submit(self.extract_archive, pid, event)
@@ -37,9 +40,10 @@ class Jobs:
         try:
             if event.is_set():
                 raise ValueError('Cancelled')
+            shutil.rmtree(workspace/'source', ignore_errors=True)
             kind = archive.detect_format(workspace/'upload.archive')
             store.update(pid, status='extracting', source_type=kind, processed_files=0,
-                         logs=['Archive received. Validating and extracting in background.'])
+                         logs=['Archive received. Validating and extracting in background.', f'Limits: selected expanded bytes={MAX_EXPANDED:,}; per-source-file bytes={MAX_FILE:,}; archive entries={MAX_FILES:,}'])
             def progress(done, total):
                 if done % 100 == 0 or done == total:
                     store.update(pid, processed_files=done, archive_entries=total)
@@ -56,7 +60,7 @@ class Jobs:
                 message = 'Cannot extract archive. Check free disk space and filesystem permissions.'
             else:
                 message = f'{type(exc).__name__}: archive processing failed'
-            store.update(pid, status='cancelled' if event.is_set() else 'extraction_failed', error=message)
+            store.update(pid, status='cancelled' if event.is_set() else 'extraction_failed', error=message, logs=store.get(pid).get('logs',[])+['Extraction failed: '+message])
         finally:
             with self.lock:
                 self.cancelled.pop(pid, None)

@@ -84,3 +84,35 @@ def test_index_blocked_during_extraction():
     store.save({'id':'extracting-test','status':'extracting','files':[]})
     with pytest.raises(ValueError):worker.submit('extracting-test')
     worker.pool.shutdown()
+
+def test_exclusions_do_not_consume_extraction_budget(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    monkeypatch.setattr(archive,'MAX_EXPANDED',20)
+    monkeypatch.setattr(archive,'MAX_FILE',15)
+    def item(name,size):return SimpleNamespace(filename=name,file_size=size,is_dir=lambda:False)
+    entries=[item('NODE_MODULES/a.js',10000),item('obj/main.dll',10000),item('huge.py',10000),item('a.py',13)]
+    opener=Mock(side_effect=lambda e:io.BytesIO(b'def f(): pass'))
+    files=archive._consume(entries,opener,tmp_path)
+    assert len(files)==4
+    assert sum(f['excluded'] for f in files)==3
+    opener.assert_called_once_with(entries[-1])
+    assert (tmp_path/'a.py').read_text()=='def f(): pass'
+
+def test_selected_budget_error_names_file_and_setting(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    monkeypatch.setattr(archive,'MAX_EXPANDED',10)
+    entries=[SimpleNamespace(filename='a.py',file_size=11,is_dir=lambda:False)]
+    opener=Mock()
+    with pytest.raises(ValueError,match='MAX_EXPANDED_MB at a.py'):
+        archive._consume(entries,opener,tmp_path)
+    opener.assert_not_called()
+
+def test_retry_extraction_reuses_uploaded_archive(monkeypatch):
+    from app.main import jobs
+    monkeypatch.setattr(jobs,'extract',Mock())
+    with TestClient(app) as c:
+        project=c.post('/api/projects/upload?filename=retry.zip',content=payload({'a.py':'def f(): pass'})).json()
+        store.update(project['id'],status='extraction_failed')
+        response=c.post(f"/api/projects/{project['id']}/extract")
+        assert response.status_code==200
+        jobs.extract.assert_called_with(project['id'])

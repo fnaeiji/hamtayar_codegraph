@@ -108,3 +108,9 @@ Restart the backend after changing limits. Limits are finite and configurable, n
 Project polling returns at most 500 manifest entries and 200 log lines. The source explorer pages/filter files through GET /api/projects/{id}/files. Full metadata stays server-side. HTTP 413 reports the configured upload cap. Over-limit chunked transfers are stopped and their partial workspace is removed.
 
 For ERR_CONNECTION_RESET first check `http://127.0.0.1:8000/api/health`. The Chrome extension resource warnings and React DevTools message are independent of API upload handling. The console alone cannot establish why the backend connection closed. Start scripts now capture runtime/backend.err.log, backend.out.log, frontend.err.log and frontend.out.log. Read backend.err.log for crashes or disk errors. Vite proxy and upload transfer timeouts are explicitly 30 minutes.
+
+### Extraction budget and skipped files
+
+The expanded-byte budget applies to selected entries, after excluding dependency/build directories (`node_modules`, `.git`, `.venv`, `vendor`, `dist`, `build`, `bin`, `obj`, `.vs`, `packages`), known binary/nested-archive extensions and files over MAX_SOURCE_FILE_MB. Every skipped file is listed with a reason; a skipped large source file is not analyzed. Actual bytes read remain bounded and checked against declared size. The archive entry-count limit still applies to all entries to bound metadata parsing.
+
+If selected source still exceeds MAX_EXPANDED_MB, the error identifies the file, selected bytes and allowed bytes. Adjust the relevant setting and restart the backend, then click **تلاش مجدد استخراج** on the failed project. This reuses the retained archive. Startup logs show effective limits. A failed archive with no remaining readable source reports that explicitly.

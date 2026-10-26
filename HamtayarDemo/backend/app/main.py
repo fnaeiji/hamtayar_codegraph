@@ -202,3 +202,15 @@ def files_page(pid: str, offset: int = 0, limit: int = 200, q: str = ''):
         raise ValueError('Invalid manifest page')
     files = [f for f in store.get(pid)['files'] if not f['excluded'] and q.casefold() in f['path'].casefold()]
     return {'files':files[offset:offset+limit], 'total':len(files), 'offset':offset, 'limit':limit}
+
+@app.post('/api/projects/{pid}/extract')
+def retry_extraction(pid: str):
+    project=store.get(pid)
+    if project['status'] not in ('extraction_failed','interrupted','cancelled') or project.get('files'):
+        raise ValueError('Only an unsuccessful archive extraction can be retried')
+    workspace=RUNTIME/'workspaces'/pid
+    if not (workspace/'upload.archive').is_file():
+        raise ValueError('Original archive is missing; upload it again')
+    # jobs.extract owns the lock; the worker clears a previous partial extraction.
+    jobs.extract(pid)
+    return public_project(store.get(pid))

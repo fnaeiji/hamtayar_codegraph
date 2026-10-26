@@ -29,3 +29,7 @@ Browser smoke execution was attempted, but Chromium was unavailable and its down
 - TypeScript/build passed.
 - An actual 64 MiB ZIP was streamed via the running Vite proxy into FastAPI, returned HTTP 202, and completed background extraction of 8 source files while health checks stayed responsive. This verifies transport/extraction only, not CGC indexing of a large codebase.
 - No claim is made that the user's exact Windows connection reset was reproduced; its backend logs are not available here.
+
+## Extraction policy correction
+
+38 backend tests passed, including excluded oversized dependencies not consuming the selected-source budget, oversized individual source skipped without opening, actionable aggregate-limit errors before extraction, and retry using the stored archive. TypeScript/build verified. This change does not assert that the user's unseen archive has been tested.

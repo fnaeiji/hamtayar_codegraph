@@ -4,7 +4,17 @@ import zipfile
 from pathlib import Path, PureWindowsPath
 from .config import MAX_EXPANDED, MAX_FILES, MAX_FILE
 
-EXCLUDED = {'.git', '.venv', 'venv', 'node_modules', 'vendor', 'dist', 'build', '__pycache__'}
+EXCLUDED = {'.git', '.venv', 'venv', 'node_modules', 'vendor', 'dist', 'build', '__pycache__', '.vs', 'bin', 'obj', 'packages'}
+BINARY_SUFFIXES = {'.dll', '.exe', '.pdb', '.so', '.dylib', '.class', '.jar', '.pyc', '.png', '.jpg', '.jpeg', '.gif', '.mp4', '.mp3', '.zip', '.rar', '.7z', '.pdf', '.woff', '.woff2', '.ttf', '.db', '.sqlite3'}
+
+def exclusion_reason(parts, size):
+    if any(p.casefold() in EXCLUDED for p in parts):
+        return 'excluded dependency/build directory'
+    if Path(parts[-1]).suffix.lower() in BINARY_SUFFIXES:
+        return 'binary or nested archive extension'
+    if size > MAX_FILE:
+        return f'file exceeds MAX_SOURCE_FILE_MB: {size:,} bytes > {MAX_FILE:,} bytes; skipped without extraction'
+    return None
 LANGUAGES = {'.py':'python','.ts':'typescript','.tsx':'tsx','.js':'javascript','.java':'java','.cs':'c_sharp','.go':'go','.rs':'rust','.cpp':'cpp','.c':'c','.php':'php','.rb':'ruby'}
 
 def detect_format(path):
@@ -18,7 +28,7 @@ def detect_format(path):
 
 def _consume(entries, opener, target, cancelled=None, progress=None):
     if len(entries) > MAX_FILES:
-        raise ValueError('Archive contains too many entries')
+        raise ValueError(f'Archive has {len(entries):,} entries; MAX_ARCHIVE_FILES allows {MAX_FILES:,}. Remove dependencies/build output or adjust this setting and restart.')
     plan, seen, declared = [], set(), 0
     for item in entries:
         if cancelled is not None and cancelled.is_set():
@@ -34,30 +44,34 @@ def _consume(entries, opener, target, cancelled=None, progress=None):
             raise ValueError('Duplicate or case-conflicting archive entries')
         seen.add(key)
         size = item.file_size
-        declared += size
-        if size < 0 or declared > MAX_EXPANDED or size > MAX_FILE:
-            raise ValueError('Archive extraction limit exceeded')
+        if size < 0:
+            raise ValueError(f'Invalid declared size for {name}')
+        reason = exclusion_reason(parts, size)
+        if not item.is_dir() and reason is None:
+            declared += size
+            if declared > MAX_EXPANDED:
+                raise ValueError(f'Selected source exceeds MAX_EXPANDED_MB at {name}: {declared:,} bytes selected, limit {MAX_EXPANDED:,} bytes. Increase MAX_EXPANDED_MB in .env and restart, or reduce the source selection.')
         dest = target.joinpath(*parts)
         if not dest.resolve().is_relative_to(target.resolve()):
             raise ValueError('Unsafe destination')
-        plan.append((item, name, parts, dest))
+        plan.append((item, name, dest, reason))
     # All path and declared-size checks finish before any member is opened.
     files, actual = [], 0
-    for number, (item, name, parts, dest) in enumerate(plan, 1):
+    for number, (item, name, dest, reason) in enumerate(plan, 1):
         if cancelled is not None and cancelled.is_set():
             raise ValueError('Cancelled')
         if progress:
             progress(number, len(plan))
         if item.is_dir():
             continue
-        if any(p in EXCLUDED for p in parts):
-            files.append({'path':name,'excluded':True,'reason':'excluded directory'})
+        if reason:
+            files.append({'path':name,'excluded':True,'size':item.file_size,'reason':reason})
             continue
         with opener(item) as stream:
             data = stream.read(min(MAX_FILE, MAX_EXPANDED-actual) + 1)
         actual += len(data)
         if len(data) > MAX_FILE or actual > MAX_EXPANDED:
-            raise ValueError('Archive extraction limit exceeded')
+            raise ValueError(f'Actual decompressed bytes exceed limits while reading {name}: file={len(data):,}/{MAX_FILE:,}, total={actual:,}/{MAX_EXPANDED:,}. Archive content may not match its headers.')
         if len(data) != item.file_size:
             raise ValueError('Archive entry size does not match its header')
         if b'\0' in data:
@@ -72,7 +86,7 @@ def _consume(entries, opener, target, cancelled=None, progress=None):
         dest.write_bytes(data)
         files.append({'path':name,'excluded':False,'size':len(data),'language':LANGUAGES.get(dest.suffix),'hash':hashlib.sha256(data).hexdigest()})
     if not any(not f['excluded'] for f in files):
-        raise ValueError('No readable source files found')
+        raise ValueError(f'No readable source files remain after filtering. {len(files)} files excluded; check dependency paths, binary types and MAX_SOURCE_FILE_MB ({MAX_FILE:,} bytes).')
     return files
 
 def unpack(path: Path, target: Path, cancelled=None, progress=None):
