@@ -16,11 +16,13 @@ def detect_format(path):
         return 'zip'
     raise ValueError('Invalid or unsupported archive; upload a ZIP or RAR file')
 
-def _consume(entries, opener, target):
+def _consume(entries, opener, target, cancelled=None, progress=None):
     if len(entries) > MAX_FILES:
         raise ValueError('Archive contains too many entries')
     plan, seen, declared = [], set(), 0
     for item in entries:
+        if cancelled is not None and cancelled.is_set():
+            raise ValueError('Cancelled')
         name = item.filename.replace('\\', '/')
         parts = name.rstrip('/').split('/')
         if (name.startswith('/') or PureWindowsPath(name).drive or
@@ -41,7 +43,11 @@ def _consume(entries, opener, target):
         plan.append((item, name, parts, dest))
     # All path and declared-size checks finish before any member is opened.
     files, actual = [], 0
-    for item, name, parts, dest in plan:
+    for number, (item, name, parts, dest) in enumerate(plan, 1):
+        if cancelled is not None and cancelled.is_set():
+            raise ValueError('Cancelled')
+        if progress:
+            progress(number, len(plan))
         if item.is_dir():
             continue
         if any(p in EXCLUDED for p in parts):
@@ -69,18 +75,18 @@ def _consume(entries, opener, target):
         raise ValueError('No readable source files found')
     return files
 
-def unpack(path: Path, target: Path):
+def unpack(path: Path, target: Path, cancelled=None, progress=None):
     kind = detect_format(path)
     target.mkdir(parents=True, exist_ok=False)
     if kind == 'rar':
         from .rar_support import read_rar
-        return read_rar(path, target, _consume)
+        return read_rar(path, target, lambda entries, opener, dest: _consume(entries, opener, dest, cancelled, progress))
     with zipfile.ZipFile(path) as archive:
         entries = archive.infolist()
         for item in entries:
             if stat.S_ISLNK(item.external_attr >> 16) or item.flag_bits & 1:
                 raise ValueError('Links and encrypted entries are not supported')
-        return _consume(entries, lambda e: archive.open(e), target)
+        return _consume(entries, lambda e: archive.open(e), target, cancelled, progress)
 
 def source(root, relative):
     p = (root / relative).resolve()

@@ -21,3 +21,11 @@ Browser smoke execution was attempted, but Chromium was unavailable and its down
 - Frontend TypeScript/build verification is recorded with the change.
 - This environment has no UnRAR/7-Zip binary: successful compressed RAR decompression on Windows remains a local acceptance check, not a claimed test pass. End-to-end CGC/Neo4j limitations above remain unchanged.
 - Small third-party binary fixtures are represented as base64, with provenance and ISC notice in backend/tests/fixtures/LICENSE.rarfile.
+
+
+## Large upload update
+
+- 35 backend tests passed: streamed upload acceptance, background extraction, HTTP 413 including missing Content-Length, failed-extraction state, cancellation and manifest pagination, plus earlier tests.
+- TypeScript/build passed.
+- An actual 64 MiB ZIP was streamed via the running Vite proxy into FastAPI, returned HTTP 202, and completed background extraction of 8 source files while health checks stayed responsive. This verifies transport/extraction only, not CGC indexing of a large codebase.
+- No claim is made that the user's exact Windows connection reset was reproduced; its backend logs are not available here.

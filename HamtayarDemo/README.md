@@ -67,7 +67,7 @@ API clients receive evidence independently of LLM generation. The endpoint is lo
 
 ## Current limits
 
-This is an initial working application, not full CLI parity. There is no arbitrary Cypher execution, enterprise ACL, vector retrieval, live Git sync, watch mode, scoped deletion, MCP server, advanced call-path analysis, compiler-backed SCIP execution, report generator or bundle import. The capability inventory makes these limitations explicit. Graph layout is interactive; code viewing uses line numbers and selection highlighting rather than a full IDE. Retrieval is lexical and may need exact code identifiers for Persian questions. Large archives and graphs are intentionally capped. Upload validation/extraction is bounded but synchronous; indexing alone is queued. Failed publication data and staging generations require a future scoped retention implementation. Cancelling during publication prevents activation but may leave inactive rows.
+This is an initial working application, not full CLI parity. There is no arbitrary Cypher execution, enterprise ACL, vector retrieval, live Git sync, watch mode, scoped deletion, MCP server, advanced call-path analysis, compiler-backed SCIP execution, report generator or bundle import. The capability inventory makes these limitations explicit. Graph layout is interactive; code viewing uses line numbers and selection highlighting rather than a full IDE. Retrieval is lexical and may need exact code identifiers for Persian questions. Large archives and graphs are intentionally capped. The UI streams uploads and queues extraction and indexing separately. The legacy multipart API remains synchronous for compatibility; large clients should use POST /api/projects/upload?filename=project.zip. Failed publication data and staging generations require a future scoped retention implementation. Cancelling during publication prevents activation but may leave inactive rows.
 
 Environment variables inherited by the server override .env during startup. Changing settings while indexing is blocked. Use one API process/worker; multiple uvicorn workers are not supported. Keep runtime/ on a durable local disk. All uploaded source and local .env must stay outside Git.
 
@@ -88,3 +88,23 @@ cd D:\CGC\HamtayarDemo
 ```
 
 Only complete single-volume, unencrypted archives are supported. Password-protected archives, multipart sets, symlinks, hardlinks, redirected entries and special files are rejected. RAR extraction uses per-entry streams; external tools never extract archive paths onto disk themselves. Both ZIP and RAR use the same path checks, file-count/expanded-size limits, exclusion policy and actual decompressed byte limits. Extraction failure removes the partial workspace. After extraction both formats follow the same CGC indexing workflow.
+
+
+## Large archives and connection resets
+
+The UI sends raw archive bytes with transfer progress, then receives HTTP 202. Validation and extraction continue in the background; refresh/polling shows `archive_queued`, `extracting`, `ready_to_index` or `extraction_failed`. 100% upload means transfer completion, not completed extraction. Requests do not stay open throughout extraction. ZIP and RAR share this workflow. The existing multipart endpoint remains available for small/backward-compatible clients.
+
+New defaults are 1024 MB upload, 8192 MB expanded data, 100000 archive entries and 25 MB per source file. **An existing .env is preserved by setup.ps1**, so explicitly update old MAX_UPLOAD_MB=50 / MAX_EXPANDED_MB=250 values if necessary:
+
+```dotenv
+MAX_UPLOAD_MB=1024
+MAX_EXPANDED_MB=8192
+MAX_ARCHIVE_FILES=100000
+MAX_SOURCE_FILE_MB=25
+```
+
+Restart the backend after changing limits. Limits are finite and configurable, not a benchmark promise for arbitrary repository sizes. Available disk and RAM still constrain workloads. Remove dependency/build directories from archives when practical. Graph publication still has its documented 50000-node/100000-edge demo caps independently of archive upload limits.
+
+Project polling returns at most 500 manifest entries and 200 log lines. The source explorer pages/filter files through GET /api/projects/{id}/files. Full metadata stays server-side. HTTP 413 reports the configured upload cap. Over-limit chunked transfers are stopped and their partial workspace is removed.
+
+For ERR_CONNECTION_RESET first check `http://127.0.0.1:8000/api/health`. The Chrome extension resource warnings and React DevTools message are independent of API upload handling. The console alone cannot establish why the backend connection closed. Start scripts now capture runtime/backend.err.log, backend.out.log, frontend.err.log and frontend.out.log. Read backend.err.log for crashes or disk errors. Vite proxy and upload transfer timeouts are explicitly 30 minutes.

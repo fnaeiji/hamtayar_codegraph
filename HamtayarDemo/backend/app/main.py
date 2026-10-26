@@ -14,6 +14,7 @@ from .config import RUNTIME, MAX_UPLOAD, setting
 from .cgc import CGCAdapter
 from .capabilities import manifest
 from .jobs import jobs
+from .uploads import receive, public_project
 
 @asynccontextmanager
 async def lifespan(app):
@@ -58,9 +59,9 @@ def capabilities(): return manifest()
 @app.get('/api/diagnostics')
 def diagnostics(): return CGCAdapter().inspect()
 @app.get('/api/projects')
-def projects(): return store.all_projects()
+def projects(): return [public_project(p) for p in store.all_projects()]
 @app.get('/api/projects/{pid}')
-def project(pid:str): return store.get(pid)
+def project(pid:str): return public_project(store.get(pid))
 @app.post('/api/projects')
 def upload(file:UploadFile=File(...)):
     pid=uuid4().hex;workspace=RUNTIME/'workspaces'/pid
@@ -168,7 +169,7 @@ class SettingsRequest(BaseModel):
 def settings_save(body:SettingsRequest):
     from . import config
     from dotenv import set_key
-    if any(p['status'] in ('queued','indexing','validating_graph') for p in store.all_projects()):
+    if any(p['status'] in ('archive_queued','extracting','queued','indexing','validating_graph') for p in store.all_projects()):
         raise ValueError('Wait for indexing to finish before changing connections')
     if set(body.values)-set(SETTING_KEYS+SECRET_KEYS):raise ValueError('Unknown setting')
     path=config.ROOT/'.env'
@@ -186,4 +187,18 @@ def settings_save(body:SettingsRequest):
 @app.get('/api/archives/capabilities')
 def archive_capabilities():
     from .rar_support import diagnostics
-    return {'formats':['zip','rar'], 'rar_decoder':diagnostics(), 'rar_encrypted':False, 'rar_multivolume':False}
+    from .config import MAX_EXPANDED, MAX_FILES, MAX_FILE
+    return {'formats':['zip','rar'], 'limits':{'upload_mb':MAX_UPLOAD//1024**2,'expanded_mb':MAX_EXPANDED//1024**2,'files':MAX_FILES,'source_file_mb':MAX_FILE//1024**2}, 'rar_decoder':diagnostics(), 'rar_encrypted':False, 'rar_multivolume':False}
+
+@app.post('/api/projects/upload', status_code=202)
+async def upload_stream(request: Request, filename: str):
+    project = await receive(request, filename)
+    jobs.extract(project['id'])
+    return public_project(project)
+
+@app.get('/api/projects/{pid}/files')
+def files_page(pid: str, offset: int = 0, limit: int = 200, q: str = ''):
+    if offset < 0 or not 1 <= limit <= 500 or len(q) > 200:
+        raise ValueError('Invalid manifest page')
+    files = [f for f in store.get(pid)['files'] if not f['excluded'] and q.casefold() in f['path'].casefold()]
+    return {'files':files[offset:offset+limit], 'total':len(files), 'offset':offset, 'limit':limit}

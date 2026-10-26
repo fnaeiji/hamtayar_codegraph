@@ -10,7 +10,7 @@ values = {**dotenv_values(Path.home() / '.codegraphcontext' / '.env'), **dotenv_
 def setting(key, default=''):
     return str(values.get(key) or default)
 CGC = setting('CGC_EXECUTABLE', str(ROOT.parent / 'CodeGraphContext' / '.venv' / ('Scripts/cgc.exe' if os.name == 'nt' else 'bin/cgc')))
-MAX_UPLOAD = int(setting('MAX_UPLOAD_MB', '50')) * 1024**2
-MAX_EXPANDED = int(setting('MAX_EXPANDED_MB', '250')) * 1024**2
-MAX_FILES = 10000
-MAX_FILE = 10 * 1024**2
+MAX_UPLOAD = int(setting('MAX_UPLOAD_MB', '1024')) * 1024**2
+MAX_EXPANDED = int(setting('MAX_EXPANDED_MB', '8192')) * 1024**2
+MAX_FILES = int(setting('MAX_ARCHIVE_FILES', '100000'))
+MAX_FILE = int(setting('MAX_SOURCE_FILE_MB', '25')) * 1024**2
