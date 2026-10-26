@@ -12,5 +12,5 @@ def setting(key, default=''):
 CGC = setting('CGC_EXECUTABLE', str(ROOT.parent / 'CodeGraphContext' / '.venv' / ('Scripts/cgc.exe' if os.name == 'nt' else 'bin/cgc')))
 MAX_UPLOAD = int(setting('MAX_UPLOAD_MB', '1024')) * 1024**2
 MAX_EXPANDED = int(setting('MAX_EXPANDED_MB', '8192')) * 1024**2
-MAX_FILES = int(setting('MAX_ARCHIVE_FILES', '100000'))
+MAX_FILES = int(setting('MAX_ARCHIVE_FILES', '250000'))
 MAX_FILE = int(setting('MAX_SOURCE_FILE_MB', '25')) * 1024**2

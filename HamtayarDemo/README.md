@@ -94,12 +94,12 @@ Only complete single-volume, unencrypted archives are supported. Password-protec
 
 The UI sends raw archive bytes with transfer progress, then receives HTTP 202. Validation and extraction continue in the background; refresh/polling shows `archive_queued`, `extracting`, `ready_to_index` or `extraction_failed`. 100% upload means transfer completion, not completed extraction. Requests do not stay open throughout extraction. ZIP and RAR share this workflow. The existing multipart endpoint remains available for small/backward-compatible clients.
 
-New defaults are 1024 MB upload, 8192 MB expanded data, 100000 archive entries and 25 MB per source file. **An existing .env is preserved by setup.ps1**, so explicitly update old MAX_UPLOAD_MB=50 / MAX_EXPANDED_MB=250 values if necessary:
+New defaults are 1024 MB upload, 8192 MB expanded data, 250000 archive entries and 25 MB per source file. **An existing .env is preserved by setup.ps1**, so explicitly update old MAX_UPLOAD_MB=50 / MAX_EXPANDED_MB=250 values if necessary:
 
 ```dotenv
 MAX_UPLOAD_MB=1024
 MAX_EXPANDED_MB=8192
-MAX_ARCHIVE_FILES=100000
+MAX_ARCHIVE_FILES=250000
 MAX_SOURCE_FILE_MB=25
 ```
 
@@ -126,3 +126,5 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/connection/test | Conve
 ```
 
 Both results must report `ok: true`. The index job now tests both before launching CGC and logs the failed target with actionable, credential-free errors. Retry Start index on the existing project; re-uploading is unnecessary. Graph and context require a successfully published index. A successful connection test alone does not validate full indexing or destination write permissions.
+
+Archive entry count includes directories and excluded dependency/build entries, to bound archive metadata processing. For example, an archive with 149,320 entries needs MAX_ARCHIVE_FILES=250000 in an existing local .env. Restart the backend, refresh the UI and use Retry extraction on the failed project; the retained archive is reused. Raising this limit does not change per-file, expanded-byte, or graph publication limits.
