@@ -1,0 +1,8 @@
+import {useEffect,useRef} from 'react';
+import cytoscape from 'cytoscape';
+export function Graph({data,onSelect}:{data:any,onSelect:(node:any)=>void}){
+ const container=useRef<HTMLDivElement>(null);const instance=useRef<cytoscape.Core|null>(null);
+ useEffect(()=>{if(!container.current)return; const colors:Record<string,string>={Function:'#60a5fa',Class:'#c084fc',File:'#34d399',Module:'#fbbf24'};
+ const cy=cytoscape({container:container.current,elements:[...(data?.nodes||[]).map((n:any)=>({data:{id:n.id,label:n.name,color:colors[n.kind]||'#94a3b8',node:n}})),...(data?.edges||[]).map((e:any,i:number)=>({data:{id:'edge'+i,source:e.source,target:e.target,label:e.kind}}))],style:[{selector:'node',style:{'background-color':'data(color)',label:'data(label)',color:'#dbeafe','font-size':10,'text-margin-y':8,'text-valign':'bottom',width:24,height:24}},{selector:'edge',style:{width:1.3,'line-color':'#475569','target-arrow-color':'#64748b','target-arrow-shape':'triangle','curve-style':'bezier'}},{selector:':selected',style:{'border-width':3,'border-color':'#f8fafc'}}],layout:{name:'cose',animate:false},maxZoom:3,minZoom:.1});instance.current=cy;cy.on('tap','node',e=>onSelect(e.target.data('node')));return()=>{cy.destroy();};},[data]);
+ return <><div className="graph-actions"><button onClick={()=>instance.current?.fit()}>نمای کامل</button><button onClick={()=>instance.current?.zoom(instance.current.zoom()*1.2)}>+</button><button onClick={()=>instance.current?.zoom(instance.current.zoom()/1.2)}>−</button></div><div ref={container} className="graph-canvas"/><div className="muted">● تابع آبی · کلاس بنفش · فایل سبز · ماژول زرد — برای گسترش روی نود کلیک کنید</div></>;
+}
