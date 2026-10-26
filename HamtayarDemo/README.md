@@ -1,6 +1,6 @@
 # Hamtayar Code Intelligence
 
-A local Persian/RTL React + FastAPI application for ZIP ingestion, CGC indexing, Neo4j graph exploration, source evidence, and optional OpenAI-compatible answers. Application code lives here; the upstream CGC checkout remains external.
+A local Persian/RTL React + FastAPI application for ZIP/RAR ingestion, CGC indexing, Neo4j graph exploration, source evidence, and optional OpenAI-compatible answers. Application code lives here; the upstream CGC checkout remains external.
 
 ## Windows quick start
 
@@ -35,7 +35,7 @@ CGC hardcodes Path.home() in this commit. Its child Python interpreter redirects
 ## First walkthrough
 
 1. Open Settings, enter the two Neo4j connections and CGC path, save and test. Empty password inputs retain existing values. Secrets are stored in local `.env`, excluded from Git; this is single-user development storage, not an encrypted enterprise vault.
-2. Upload a small ZIP with real functions/classes. Inspect accepted/excluded files.
+2. Upload a small ZIP or RAR with real functions/classes. Inspect accepted/excluded files.
 3. Click Index. The real CGC process runs in the background. Follow the status and sanitized logs. No fabricated percentage is shown.
 4. Wait for `ready`. Zero declarations is an error, not success.
 5. Search an exact function name. Open source, then inspect its graph neighbors. Graph views cap results at 300 edges and show truncation.
@@ -43,7 +43,7 @@ CGC hardcodes Path.home() in this commit. Its child Python interpreter redirects
 7. Retrieve context using identifiers or filenames from your question. Export the JSON evidence pack.
 8. Optionally set LLM_BASE_URL, LLM_MODEL and LLM_API_KEY. Selected evidence is sent to that provider only when clicking the LLM action. No evidence means no model request.
 
-Project IDs, archive hashes and index attempt IDs are separate. ZIP hashes are not Git commits. Reindexing creates a new active generation only after validation. All source evidence resolves against the retained immutable upload. Jobs interrupted by restart are marked interrupted; previous active indexes remain queryable.
+Project IDs, archive hashes and index attempt IDs are separate. Archive hashes are not Git commits. Reindexing creates a new active generation only after validation. All source evidence resolves against the retained immutable upload. Jobs interrupted by restart are marked interrupted; previous active indexes remain queryable.
 
 ## Validation
 
@@ -70,3 +70,21 @@ API clients receive evidence independently of LLM generation. The endpoint is lo
 This is an initial working application, not full CLI parity. There is no arbitrary Cypher execution, enterprise ACL, vector retrieval, live Git sync, watch mode, scoped deletion, MCP server, advanced call-path analysis, compiler-backed SCIP execution, report generator or bundle import. The capability inventory makes these limitations explicit. Graph layout is interactive; code viewing uses line numbers and selection highlighting rather than a full IDE. Retrieval is lexical and may need exact code identifiers for Persian questions. Large archives and graphs are intentionally capped. Upload validation/extraction is bounded but synchronous; indexing alone is queued. Failed publication data and staging generations require a future scoped retention implementation. Cancelling during publication prevents activation but may leave inactive rows.
 
 Environment variables inherited by the server override .env during startup. Changing settings while indexing is blocked. Use one API process/worker; multiple uvicorn workers are not supported. Keep runtime/ on a durable local disk. All uploaded source and local .env must stay outside Git.
+
+
+## RAR upload
+
+ZIP and RAR are detected from file contents, not just the filename. RAR3/RAR5 archives use `rarfile==4.5`; compressed entries need an external UnRAR or 7-Zip decoder. Stored RAR entries can be read without an external tool. Windows defaults are auto-discovered at `C:/Program Files/WinRAR/UnRAR.exe` and `C:/Program Files/7-Zip/7z.exe`.
+
+If needed, install 7-Zip from https://www.7-zip.org/ or use your existing WinRAR installation. Set **RAR_7ZIP_TOOL** or **RAR_UNRAR_TOOL** in Settings using the full executable path. The app does not install an external program automatically. `GET /api/archives/capabilities` reports decoder readiness; the upload page shows an actionable notice when none is found. After changing the path, save Settings to refresh the status.
+
+Update an existing installation:
+
+```powershell
+cd D:\CGC\HamtayarDemo
+.\scripts\stop-dev.ps1
+.\scripts\setup.ps1
+.\scripts\start-dev.ps1
+```
+
+Only complete single-volume, unencrypted archives are supported. Password-protected archives, multipart sets, symlinks, hardlinks, redirected entries and special files are rejected. RAR extraction uses per-entry streams; external tools never extract archive paths onto disk themselves. Both ZIP and RAR use the same path checks, file-count/expanded-size limits, exclusion policy and actual decompressed byte limits. Extraction failure removes the partial workspace. After extraction both formats follow the same CGC indexing workflow.

@@ -65,17 +65,19 @@ def project(pid:str): return store.get(pid)
 def upload(file:UploadFile=File(...)):
     pid=uuid4().hex;workspace=RUNTIME/'workspaces'/pid
     workspace.mkdir(parents=True)
-    destination=workspace/'upload.zip'; size=0;digest=hashlib.sha256()
+    destination=workspace/'upload.archive'; size=0;digest=hashlib.sha256()
     try:
         with destination.open('wb') as out:
             while chunk:=file.file.read(1024**2):
                 size+=len(chunk)
-                if size>MAX_UPLOAD: raise ValueError('ZIP exceeds upload limit')
+                if size>MAX_UPLOAD: raise ValueError('Archive exceeds upload limit')
                 digest.update(chunk);out.write(chunk)
         import zipfile
-        try: files=archive.unpack(destination,workspace/'source')
-        except (zipfile.BadZipFile,RuntimeError,OSError) as e: raise ValueError('Invalid, unreadable or unsupported ZIP') from e
-        p={'id':pid,'name':Path(file.filename or 'Project').stem[:100],'status':'ready_to_index','source_type':'zip','source_version':digest.hexdigest(),'created_at':store.now(),'files':files,'logs':[],'active_index':None}
+        try:
+            source_type=archive.detect_format(destination)
+            files=archive.unpack(destination,workspace/'source')
+        except (zipfile.BadZipFile,RuntimeError,OSError) as e: raise ValueError('Invalid, unreadable or unsupported archive; upload ZIP or RAR') from e
+        p={'id':pid,'name':Path(file.filename or 'Project').stem[:100],'status':'ready_to_index','source_type':source_type,'source_version':digest.hexdigest(),'created_at':store.now(),'files':files,'logs':[],'active_index':None}
         store.save(p);return p
     except Exception:
         shutil.rmtree(workspace,ignore_errors=True);raise
@@ -154,7 +156,7 @@ async def chat(pid:str,body:ContextRequest):
         return {'context':pack,'answer':answer,'citations':sorted(cited)}
     except (httpx.HTTPError,KeyError,TypeError):return {'context':pack,'answer':None,'error':'Model request failed; retrieved evidence is still available'}
 
-SETTING_KEYS=('CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
+SETTING_KEYS=('RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
 SECRET_KEYS=('NEO4J_PASSWORD','STAGING_NEO4J_PASSWORD','LLM_API_KEY')
 @app.get('/api/settings')
 def settings_get():
@@ -180,3 +182,8 @@ def settings_save(body:SettingsRequest):
             from . import cgc
             cgc.CGC=value
     return settings_get()
+
+@app.get('/api/archives/capabilities')
+def archive_capabilities():
+    from .rar_support import diagnostics
+    return {'formats':['zip','rar'], 'rar_decoder':diagnostics(), 'rar_encrypted':False, 'rar_multivolume':False}

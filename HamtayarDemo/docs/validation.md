@@ -13,3 +13,11 @@ Not yet claimed:
 Unit tests use graph-boundary doubles where Neo4j is required. They are not a substitute for the real graph acceptance flow. Run scripts/smoke-test.ps1 and the README walkthrough on the user's Windows machine before treating the demo as validated end to end.
 
 Browser smoke execution was attempted, but Chromium was unavailable and its download returned an invalid archive in this environment. The smoke script is provided; no browser pass or visual verification is claimed.
+
+
+## RAR update
+
+- 28 backend tests passed after adding RAR, including a genuine stored RAR3 upload/source-read round trip, a genuine compressed RAR5 fixture with missing-decoder handling, malformed signatures, rejected links/redirects/volumes/passwords, and actual-vs-declared size checks.
+- Frontend TypeScript/build verification is recorded with the change.
+- This environment has no UnRAR/7-Zip binary: successful compressed RAR decompression on Windows remains a local acceptance check, not a claimed test pass. End-to-end CGC/Neo4j limitations above remain unchanged.
+- Small third-party binary fixtures are represented as base64, with provenance and ISC notice in backend/tests/fixtures/LICENSE.rarfile.
