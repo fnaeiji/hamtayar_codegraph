@@ -128,3 +128,22 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/api/connection/test | Conve
 Both results must report `ok: true`. The index job now tests both before launching CGC and logs the failed target with actionable, credential-free errors. Retry Start index on the existing project; re-uploading is unnecessary. Graph and context require a successfully published index. A successful connection test alone does not validate full indexing or destination write permissions.
 
 Archive entry count includes directories and excluded dependency/build entries, to bound archive metadata processing. For example, an archive with 149,320 entries needs MAX_ARCHIVE_FILES=250000 in an existing local .env. Restart the backend, refresh the UI and use Retry extraction on the failed project; the retained archive is reused. Raising this limit does not change per-file, expanded-byte, or graph publication limits.
+
+
+## Slow indexing diagnostics and explicit scope
+
+The inspected CGC 0.6.13/pinned CLI reports missing files but then invokes a full discovery/pre-scan/parse/write/resolution pass. A count such as 10106/10224 is not remaining work or a completion percentage. The demo uses the same CGC indexing helper directly, bypassing the file-count-only early-success check which could skip unfinished relationship resolution. This remains a full selected-scope pass, not incremental resume. The child-process bridge uses CGC internal APIs; upstream files are untouched and incompatible versions fail visibly.
+
+In Upload, use **بررسی فایل‌های سنگین و محدودهٔ ایندکس** before starting. It lists largest candidates and up to 100 exclusions. CGC language/ignore rules further narrow this selection. Use **گزارش زمان و فایل‌های کنارگذاشته‌شده** for actual selection counts, exclusions and slowest operations. Full reports are retained in `runtime/cgc/<job>/report.json`; API lists are bounded.
+
+Settings exposes:
+- `INDEX_MAX_FILE_MB=2`: exclude larger files before CGC pre-scan/parsing. Set `0` to disable this filter; extraction limits still apply.
+- `INDEX_EXCLUDE_GLOBS=*.min.js,*.min.css,*.map`: comma-separated, case-insensitive filename patterns. Patterns containing `/` match relative paths. Set a single `-` to disable these exclusions.
+- `INDEX_PARALLEL_WORKERS=2`: parsing concurrency, configurable 1..8.
+- `INDEX_TIMEOUT_SECONDS=7200`: whole-process deadline, configurable 60..86400 seconds.
+
+If your app ships third-party Stimulsoft bundles, optionally add `stimulsoft*.js` after reviewing the preview. Filenames alone do not prove the cause of a stall. Large first-party files may also be excluded by the size policy. Excluded files remain viewable as source but are not analyzed in the graph; context coverage discloses omissions. Publication filters old staging nodes against this attempt's selected paths so prior runs cannot reintroduce excluded files.
+
+Logs include timestamps, CGC INFO diagnostics, and a heartbeat every 10 seconds with active stages/files and elapsed time. Parsing, pre-scan, writes and call-resolution timings are recorded. Heartbeat is process activity, not guaranteed progress. Buffered log updates avoid rewriting the large archive manifest for every line. Missing parsers and reported parse/write failures prevent publication. Independent 50,000-node / 100,000-edge publication limits remain: this is not an arbitrary-large-repository scalability guarantee.
+
+For an existing upload: cancel the active index, pull `codex/hamtayar-demo`, restart the demo, refresh the browser, review preview/settings, then start indexing on the same project. No re-upload is required. Changes affect the next attempt. Docker memory configuration remains separate.

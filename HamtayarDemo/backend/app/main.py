@@ -141,7 +141,7 @@ def context(pid:str,body:ContextRequest):
         if len(excerpt)>remaining:truncated=True;continue
         remaining-=len(excerpt)
         evidence.append({'id':f'E{len(evidence)+1}','symbol':n['name'],'path':n['path'],'start_line':start,'end_line':end,'text':excerpt,'reason':'Identifier/path substring match'})
-    return {'project':pid,'source_version':p['source_version'],'index':idx,'question':body.question,'evidence':evidence,'relations':graph.neighborhood(idx,next(iter(found),None)) if found else {'nodes':[],'edges':[]},'truncated':truncated,'used_chars':body.max_chars-remaining,'token_estimate':(body.max_chars-remaining)//4,'budget_unit':'characters; token estimate is approximate','limitations':['Lexical identifier/path retrieval; no vector search','Static analysis may miss dynamic dispatch','Only bounded direct graph neighborhoods are returned'],'trace_id':uuid4().hex}
+    return {'project':pid,'source_version':p['source_version'],'index':idx,'question':body.question,'evidence':evidence,'relations':graph.neighborhood(idx,next(iter(found),None)) if found else {'nodes':[],'edges':[]},'truncated':truncated,'used_chars':body.max_chars-remaining,'token_estimate':(body.max_chars-remaining)//4,'budget_unit':'characters; token estimate is approximate','coverage':p.get('index_coverage',{}),'limitations':['Files excluded by the indexing policy are not analyzed','Lexical identifier/path retrieval; no vector search','Static analysis may miss dynamic dispatch','Only bounded direct graph neighborhoods are returned'],'trace_id':uuid4().hex}
 @app.post('/api/projects/{pid}/chat')
 async def chat(pid:str,body:ContextRequest):
     pack=context(pid,body)
@@ -157,12 +157,13 @@ async def chat(pid:str,body:ContextRequest):
         return {'context':pack,'answer':answer,'citations':sorted(cited)}
     except (httpx.HTTPError,KeyError,TypeError):return {'context':pack,'answer':None,'error':'Model request failed; retrieved evidence is still available'}
 
-SETTING_KEYS=('RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
+SETTING_KEYS=('INDEX_MAX_FILE_MB','INDEX_EXCLUDE_GLOBS','INDEX_PARALLEL_WORKERS','INDEX_TIMEOUT_SECONDS','RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
 SECRET_KEYS=('NEO4J_PASSWORD','STAGING_NEO4J_PASSWORD','LLM_API_KEY')
 @app.get('/api/settings')
 def settings_get():
     from .config import CGC
-    return {'values':{k:setting(k,CGC if k=='CGC_EXECUTABLE' else '') for k in SETTING_KEYS},'secrets_present':{k:bool(setting(k)) for k in SECRET_KEYS},'storage':'Local .env file outside Git; restart is not needed for connection settings'}
+    defaults={'INDEX_MAX_FILE_MB':'2','INDEX_EXCLUDE_GLOBS':'*.min.js,*.min.css,*.map','INDEX_PARALLEL_WORKERS':'2','INDEX_TIMEOUT_SECONDS':'7200'}
+    return {'values':{k:setting(k,CGC if k=='CGC_EXECUTABLE' else defaults.get(k,'')) for k in SETTING_KEYS},'secrets_present':{k:bool(setting(k)) for k in SECRET_KEYS},'storage':'Local .env file outside Git; restart is not needed for connection settings'}
 class SettingsRequest(BaseModel):
     values:dict[str,str]
 @app.post('/api/settings')
@@ -214,3 +215,22 @@ def retry_extraction(pid: str):
     # jobs.extract owns the lock; the worker clears a previous partial extraction.
     jobs.extract(pid)
     return public_project(store.get(pid))
+
+@app.get('/api/projects/{pid}/index-preview')
+def index_preview(pid: str):
+    from .index_policy import preview
+    return preview(store.get(pid)['files'])
+
+@app.get('/api/projects/{pid}/index-report')
+def index_report(pid: str):
+    p=store.get(pid); job=p.get('job')
+    if not job or not (RUNTIME/'cgc'/job/'report.json').is_file():
+        return {'available':False,'note':'No report yet; check processing logs.'}
+    report=json.loads((RUNTIME/'cgc'/job/'report.json').read_text(encoding='utf-8'))
+    summary=report.get('summary')
+    if isinstance(summary,dict) and 'failed_file_details' in summary:
+        summary['failed_file_details']=summary['failed_file_details'][:100]
+    report['unparsed']=report.get('unparsed',[])[:100]
+    return {'available':True,**report,'job_status':p['status'],'selected':report.get('selected',[])[:20],
+            'selected_count':len(report.get('selected',[])), 'skipped':report.get('skipped',[])[:100],
+            'skipped_count':len(report.get('skipped',[]))}

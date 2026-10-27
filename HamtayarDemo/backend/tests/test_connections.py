@@ -60,4 +60,4 @@ def test_destination_preflight_prevents_cgc_and_logs_failure(monkeypatch):
     index.assert_not_called()
     assert result['status']=='failed' and result['active_index']=='previous'
     assert 'destination' in result['error']
-    assert result['logs'][-1].startswith('Indexing failed:')
+    assert 'Indexing failed:' in result['logs'][-1]

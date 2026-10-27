@@ -1,4 +1,5 @@
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 from . import archive, graph, store
@@ -70,10 +71,21 @@ class Jobs:
                 raise ValueError('No running job')
             self.cancelled[pid].set()
     def run(self,pid,job,event):
+        buffer=[]; buffer_lock=threading.RLock(); last_flush=time.monotonic()
+        def flush():
+            nonlocal last_flush
+            with buffer_lock:
+                if buffer:
+                    with store.LOCK:
+                        p=store.get(pid)
+                        store.update(pid,logs=(p.get('logs',[])+buffer)[-1000:])
+                    buffer.clear()
+                last_flush=time.monotonic()
         def log(line):
-            with store.LOCK:
-                p=store.get(pid)
-                store.update(pid,logs=(p.get('logs',[])+[line])[-1000:])
+            with buffer_lock:
+                buffer.append(f'[{store.now()}] {line}')
+                if len(buffer)>=50 or time.monotonic()-last_flush>=2:
+                    flush()
         try:
             if event.is_set():
                 raise ValueError('Cancelled')
@@ -90,20 +102,22 @@ class Jobs:
                 log(f'Neo4j {name}: connection OK')
             store.update(pid,status='indexing')
             workspace=RUNTIME/'workspaces'/pid/'source'
-            CGCAdapter().index(workspace,job,event,log)
+            report=CGCAdapter().index(workspace,job,event,log)
             if event.is_set():
                 raise ValueError('Cancelled')
             store.update(pid,status='validating_graph')
-            counts=graph.publish(pid,job,workspace)
+            log('CGC completed. Validating and publishing selected graph to destination...')
+            counts=graph.publish(pid,job,workspace,selected_paths=report['selected'])
             if event.is_set():
                 raise ValueError('Cancelled')
-            store.update(pid,status='ready',active_index=job,counts=counts,finished_at=store.now())
+            store.update(pid,status='ready',active_index=job,counts=counts,index_coverage={'selected_files':len(report['selected']),'skipped_files':len(report['skipped'])},finished_at=store.now())
         except Exception as e:
             # Keep driver messages/credentials out of API errors.
             error=str(e) if isinstance(e,ValueError) else f'{type(e).__name__}: connection or processing failed; check local configuration'
             log('Indexing failed: '+error)
             store.update(pid,status='cancelled' if event.is_set() else 'failed',error=error,finished_at=store.now())
         finally:
+            flush()
             with self.lock:
                 self.cancelled.pop(pid,None)
 

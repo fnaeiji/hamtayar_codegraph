@@ -33,3 +33,11 @@ Browser smoke execution was attempted, but Chromium was unavailable and its down
 ## Extraction policy correction
 
 38 backend tests passed, including excluded oversized dependencies not consuming the selected-source budget, oversized individual source skipped without opening, actionable aggregate-limit errors before extraction, and retry using the stored archive. TypeScript/build verified. This change does not assert that the user's unseen archive has been tested.
+
+## Slow indexing and timeout diagnostics
+
+- 52 backend tests passed; frontend TypeScript and production build passed.
+- The optional bridge integration test ran with installed CGC 0.6.13, real discovery/pre-scan/C# parsing and resolution using the installed native C# grammar. Database persistence was mocked. A second run with an unavailable parser correctly failed instead of publishing an incomplete graph.
+- Tests cover explicit size/pattern exclusions without source deletion, disabling policy filters, invalid limit values, active/slow operation tracking, bounded report responses and publication query scoping to selected paths.
+- No Docker daemon is available in this environment. The user's 10,224-file archive, Windows cancellation and full CGC-to-staging-to-destination publication were not exercised here. No measured speedup or full large-project completion is claimed.
+- Existing graph publication limits remain 50,000 nodes / 100,000 edges. The new 7,200-second default CGC deadline is configurable, and increasing it alone is not a performance fix.

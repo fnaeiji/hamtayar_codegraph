@@ -48,11 +48,21 @@ def connection_error(exc, staging=False):
 def query(text, staging=False, **params):
     return Graph(staging).run(text, **params)
 
-def publish(project, index, workspace):
+def publish(project, index, workspace, selected_paths=None):
     # Global Module/ExternalClass nodes are shared in CGC. Snapshot their properties,
     # not their identity, into this version. Never copy edges to another path's code.
     prefix = workspace.resolve().as_posix() + '/'
-    nodes = query('MATCH (n) WHERE n.path=$root OR n.path STARTS WITH $prefix RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props LIMIT 50001', True, root=prefix[:-1], prefix=prefix)
+    # Exclude stale nodes from files omitted by this attempt's policy.
+    scoped = selected_paths is not None
+    paths=set(selected_paths or [])
+    if scoped:
+        from pathlib import Path
+        for path in list(paths):
+            current=Path(path).parent
+            while current.as_posix().startswith(prefix):
+                paths.add(current.as_posix());current=current.parent
+        paths.add(prefix[:-1])
+    nodes = query('MATCH (n) WHERE (n.path=$root OR n.path STARTS WITH $prefix) AND ($scoped = false OR n.path IN $paths) RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props LIMIT 50001', True, root=prefix[:-1], prefix=prefix, scoped=scoped, paths=sorted(paths))
     if not nodes or len(nodes) > 50000:
         raise ValueError('No graph data or staging graph exceeds 50000-node demo limit')
     owned = {n['id'] for n in nodes}
