@@ -56,3 +56,10 @@ Browser smoke execution was attempted, but Chromium was unavailable and its down
 - A real Neo4j Community 5.26.0 test created a small class/method/dependency graph with a cycle, isolated class and adjacent foreign-index node. Verified exact outgoing neighborhoods at depth 1/2/3, incoming arrows, filtered roots, node-budget truncation, dynamic relationship kinds and rejection of a foreign root. Test data and the isolated test server were cleaned up.
 - This verifies retrieval over stored relationships, not completeness of CGC's dependency extraction for the user's class. The user's exact class name/source and graph were not supplied.
 - The real Neo4j test also passed after anchoring each hop at indexed frontier identities instead of scanning all project relationships. Browser interaction testing was unavailable because Chromium download returned an invalid/truncated archive; no browser-render or click-through pass is claimed.
+
+## Quiet, focused graph visualization
+
+- Frontend TypeScript and Vite build passed.
+- Real browser acceptance check passed using Playwright with Chrome Headless Shell 131 on Linux and synthetic API responses (80 nodes / 79 edges). Verified search-to-graph navigation, node/edge labels hidden by default, full-name hover tooltip, unrelated-element fading, click selection retained after pointer departure, clear focus, optional labels, radial/force layouts, expanded view, Escape, and toolbar wrapping; no browser runtime errors were observed.
+- Visually inspected default and hover screenshots. Corrected an overly sparse radial scale and grouped outer-ring siblings to reduce edge crossings. The 80-node fixture rendered its root at ~11.4 screen pixels after fit and other nodes at >=4.3 pixels. These are fixture observations, not a guarantee for every graph size.
+- No backend or stored graph changes. The user's Windows browser and exact graph were not accessed; no CGC re-indexing is needed for this display update.
