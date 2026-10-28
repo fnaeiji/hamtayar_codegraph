@@ -59,11 +59,13 @@ def test_recovery_preserves_index():
 
 def test_graph_queries_scope_both_endpoints(monkeypatch):
     calls=[]
-    def capture(q,**params):calls.append((q,params));return []
+    def capture(q,**params):
+        calls.append((q,params))
+        return [{'node':{'id':'my-symbol'}}] if ' AS node' in q else []
     monkeypatch.setattr(graph,'query',capture)
     graph.neighborhood('my-index',symbol='my-symbol')
-    assert 'a.index=$index AND b.index=$index' in calls[0][0]
-    assert calls[0][1]['index']=='my-index'
+    assert 'a.index=$index AND b.index=$index' in calls[1][0]
+    assert calls[1][1]['index']=='my-index'
 
 def test_publish_scopes_identity_and_preserves_legacy(publication_db,tmp_path):
     graph.publish('A','v1',tmp_path);graph.publish('B','v2',tmp_path)

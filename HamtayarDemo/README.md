@@ -150,7 +150,7 @@ For an existing upload: cancel the active index, pull `codex/hamtayar-demo`, res
 
 ## Streamed graph publication (replaces the fixed 50k/100k caps)
 
-CGC completion and publication are separate stages. Publication now reads lazy Neo4j streams (fetch size 500) and writes bounded batches, instead of loading the whole graph and relationship list into Python. Driver connections are reused throughout the transfer. Destination lookup indexes on HamtayarEntity.id and .index are created before writing; the Neo4j user needs index creation permissions. The UI graph remains limited to 300 relationships per response.
+CGC completion and publication are separate stages. Publication now reads lazy Neo4j streams (fetch size 500) and writes bounded batches, instead of loading the whole graph and relationship list into Python. Driver connections are reused throughout the transfer. Destination lookup indexes on HamtayarEntity.id and .index are created before writing; the Neo4j user needs index creation permissions. Graph explorer caps are separate from stored graph size; see the dependency explorer section below.
 
 Settings / local .env:
 
@@ -166,3 +166,13 @@ These are publication ceilings, independent of extraction and CGC scope. Above-l
 Use **تلاش مجدد انتشار گراف، بدون ایندکس مجدد** on a project whose CGC analysis completed but publication failed. The backend validates the completed report belongs to the uploaded workspace and reuses its selected scope. It creates a fresh destination generation and activates it only after successful publication. The old active generation remains usable on failure/cancellation. This also works with completed reports from before this change. Changing the analysis scope requires a new index, not a publication retry.
 
 Progress logs report source node counts, transferred nodes and relationships. Failed partial generations remain inactive in Neo4j; this patch does not garbage-collect historical/partial generations. Publication cancellation is checked between records/batches; an in-flight database request must return or time out first. Keep staging unchanged during publication. All queries remain scoped to selected files/ancestors plus adjacent pathless entities, excluding other repositories' path-bearing nodes.
+
+## Dependency explorer depth and class focus
+
+From a symbol search result, click **گراف وابستگی این نود**. This opens the selected class/function as the graph root. The graph tab also offers a selector for the current symbol search results; text-search hits are not graph identities and must be opened through symbol search instead. Names may repeat across files: choose by kind/path/line. Entering the graph tab from the menu loads the current root, or a bounded project overview when no root is selected.
+
+Select depth 1..5, direction (incoming, outgoing, both), actual project relationship kind and a node budget (100/200/500), then apply. The root has a gold border. Clicking another node selects it; **مرکز روی نود منتخب** or the expand button re-centers traversal at the selected depth. Original edge directions and kind labels remain visible. The graph response reports applied depth/direction, expanded depth and explicit truncation. It includes an isolated root even when no matching relationships exist.
+
+Traversal is bounded breadth-first expansion, capped at 500 nodes and 1000 relationships with at most five hop queries. It does not enumerate unbounded variable-length paths. All visited endpoints belong to the project's active index. Overview has no root and is a bounded edge sample, not a multi-level class dependency tree. Large source/property blobs are omitted from graph responses.
+
+These are stored static-analysis relationships, not newly inferred dependencies: a class may connect to its methods through CONTAINS/DEFINES and then to dependencies through CALLS, requiring depth 2 or 3 with all relationships enabled. A strict CALLS filter does not cross a structural class-to-method edge. Incoming/outgoing refer to the arrow of each selected relation, not a universal semantic definition of dependency. An empty filtered graph does not prove the class has no runtime dependencies. Existing published graphs work without re-indexing; missing CGC relationships cannot be manufactured by visualization.

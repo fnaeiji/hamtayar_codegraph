@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 import httpx
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from . import archive, graph, store
@@ -110,8 +110,15 @@ def search(pid:str,q:str='',mode:str='symbol'):
         return results
     return graph.search(idx,q)
 @app.get('/api/projects/{pid}/graph')
-def subgraph(pid:str,symbol:str|None=None,relation:str|None=None):
-    _,idx=selected(pid);return graph.neighborhood(idx,symbol,relation)
+def subgraph(pid:str,symbol:str|None=None,relation:str|None=None,
+             depth:int=Query(default=1,ge=1,le=5),direction:str='both',
+             max_nodes:int=Query(default=200,ge=1,le=500),max_edges:int=Query(default=300,ge=1,le=1000)):
+    _,idx=selected(pid)
+    return graph.neighborhood(idx,symbol,relation,depth,direction,max_nodes,max_edges)
+
+@app.get('/api/projects/{pid}/graph/relations')
+def graph_relations(pid:str):
+    _,idx=selected(pid);return graph.relationship_types(idx)
 class QueryRequest(BaseModel):
     template:str
     term:str=Field(default='',max_length=200)

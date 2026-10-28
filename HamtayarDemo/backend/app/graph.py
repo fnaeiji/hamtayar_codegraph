@@ -61,7 +61,53 @@ def publish(project, index, workspace, selected_paths=None, cancelled=None, log=
 def search(index, term='', limit=100):
     return query('MATCH (n:HamtayarEntity) WHERE n.index=$index AND (toLower(n.name) CONTAINS toLower($term) OR toLower(n.path) CONTAINS toLower($term)) RETURN properties(n) AS node ORDER BY n.path,n.line LIMIT $limit', index=index,term=term,limit=limit)
 
-def neighborhood(index, symbol=None, relation=None):
-    rows=query('MATCH (a:HamtayarEntity)-[r:HAMTAYAR_LINK]->(b:HamtayarEntity) WHERE a.index=$index AND b.index=$index AND ($symbol IS NULL OR a.id=$symbol OR b.id=$symbol) AND ($relation IS NULL OR r.kind=$relation) RETURN properties(a) AS a, properties(b) AS b,r.kind AS kind LIMIT 301',index=index,symbol=symbol,relation=relation)
-    nodes={n['id']:n for row in rows[:300] for n in (row['a'],row['b'])}
-    return {'nodes':list(nodes.values()),'edges':[{'source':r['a']['id'],'target':r['b']['id'],'kind':r['kind']} for r in rows[:300]],'truncated':len(rows)>300}
+def neighborhood(index, symbol=None, relation=None, depth=1, direction='both', max_nodes=200, max_edges=300):
+    """Bounded breadth-first expansion, never an unbounded variable-length path."""
+    if not 1<=depth<=5 or direction not in ('both','outgoing','incoming') or not 1<=max_nodes<=500 or not 1<=max_edges<=1000:
+        raise ValueError('Graph bounds: depth 1..5, nodes 1..500, edges 1..1000; direction both/outgoing/incoming')
+    if relation is not None and len(relation)>100: raise ValueError('Relationship filter is too long')
+    nodes={};edges={};truncated=False;reasons=[];expanded=0
+    if symbol:
+        seed=query('MATCH (n:HamtayarEntity {id:$symbol}) WHERE n.index=$index RETURN n{.id,.name,.kind,.path,.line,.end,.index} AS node LIMIT 1',symbol=symbol,index=index)
+        if not seed: raise ValueError('Selected symbol is not in the active project index; search again')
+        nodes[symbol]=seed[0]['node'];frontier=[symbol]
+    else:
+        frontier=[]
+    for hop in range(depth if symbol else 1):
+        if symbol and not frontier: break
+        remaining=max_edges-len(edges)
+        if remaining<=0: truncated=True;reasons.append('edge_limit');break
+        if symbol:
+            pattern={'outgoing':'(s)-[r:HAMTAYAR_LINK]->(t:HamtayarEntity)',
+                     'incoming':'(s)<-[r:HAMTAYAR_LINK]-(t:HamtayarEntity)',
+                     'both':'(s)-[r:HAMTAYAR_LINK]-(t:HamtayarEntity)'}[direction]
+            text=('MATCH (s:HamtayarEntity) WHERE s.index=$index AND s.id IN $frontier '
+                  'MATCH '+pattern+' WHERE t.index=$index '
+                  'WITH startNode(r) AS a, endNode(r) AS b,r ')
+        else:
+            text='MATCH (a:HamtayarEntity)-[r:HAMTAYAR_LINK]->(b:HamtayarEntity) '
+        rows=query(text+'WHERE a.index=$index AND b.index=$index AND ($relation IS NULL OR r.kind=$relation) '
+            'RETURN a{.id,.name,.kind,.path,.line,.end,.index} AS a, b{.id,.name,.kind,.path,.line,.end,.index} AS b,r.kind AS kind LIMIT $limit',
+            index=index,relation=relation,frontier=frontier,limit=remaining+1)
+        if len(rows)>remaining: truncated=True;reasons.append('edge_limit')
+        next_frontier=[]
+        for row in rows[:remaining]:
+            a,b=row['a'],row['b'];key=(a['id'],b['id'],row['kind'])
+            if key in edges:continue
+            additions={n['id']:n for n in (a,b) if n['id'] not in nodes}
+            if len(nodes)+len(additions)>max_nodes:
+                truncated=True;reasons.append('node_limit');continue
+            nodes.update(additions);next_frontier.extend(additions)
+            edges[key]={'source':a['id'],'target':b['id'],'kind':row['kind']}
+        expanded=hop+1
+        if truncated:break
+        frontier=next_frontier
+    return {'nodes':list(nodes.values()),'edges':list(edges.values()),'truncated':truncated,
+            'truncation_reasons':sorted(set(reasons)),'root':symbol,'depth':depth,
+            'expanded_depth':expanded,'direction':direction,'relation':relation,
+            'limits':{'nodes':max_nodes,'edges':max_edges},'mode':'neighborhood' if symbol else 'overview'}
+
+
+def relationship_types(index):
+    return query('MATCH (a:HamtayarEntity)-[r:HAMTAYAR_LINK]->(b:HamtayarEntity) '
+                 'WHERE a.index=$index AND b.index=$index RETURN r.kind AS kind,count(r) AS total ORDER BY total DESC',index=index)
