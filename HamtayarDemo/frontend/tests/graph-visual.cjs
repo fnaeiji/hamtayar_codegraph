@@ -26,7 +26,9 @@ const graph={nodes,edges,root:'n0',mode:'neighborhood',depth:2,expanded_depth:2,
    else if(url.pathname==='/api/projects/visual-demo')body=project;
    else if(url.pathname.endsWith('/search'))body=[{node:nodes[0]}];
    else if(url.pathname.endsWith('/graph/relations'))body=[{kind:'CONTAINS',total:16},{kind:'USES',total:63}];
-   else if(url.pathname.endsWith('/graph'))body=graph;
+   else if(url.pathname.endsWith('/graph/kinds'))body=[{kind:'Class',total:1},{kind:'Function',total:16},{kind:'Parameter',total:63}];
+   else if(url.pathname.endsWith('/graph')){const kinds=url.searchParams.get('kinds');const filtered=kinds?nodes.filter(n=>kinds.split(',').includes(n.kind)):nodes;const ids=new Set(filtered.map(n=>n.id));body={...graph,nodes:filtered,edges:edges.filter(e=>ids.has(e.source)&&ids.has(e.target)),hidden_nodes:nodes.length-filtered.length,root_filtered:!ids.has('n0')};}
+   else if(url.pathname.endsWith('/llm/test'))body={ok:false,code:'LLM_HTTP_401',message:'Authentication failed: check LLM_API_KEY for this provider.',http_status:401};
    else if(url.pathname.endsWith('/archives/capabilities'))body={limits:{upload_mb:1024},rar_decoder:{available:true}};
    else if(url.pathname.endsWith('/capabilities'))body=[];
    else if(url.pathname.endsWith('/settings'))body={values:{}};
@@ -64,7 +66,10 @@ const graph={nodes,edges,root:'n0',mode:'neighborhood',depth:2,expanded_depth:2,
   await page.getByRole('button',{name:'جا دادن گراف',exact:true}).click();
   if(process.env.GRAPH_TEST_SCREENSHOT)await page.locator('.graph-view').screenshot({path:process.env.GRAPH_TEST_SCREENSHOT});
   const metrics=await page.evaluate(()=>{const cy=document.querySelector('.graph-canvas')._cyreg.cy;return {zoom:cy.zoom(),rootWidth:cy.getElementById('n0').renderedWidth(),minWidth:Math.min(...cy.nodes().map(n=>n.renderedWidth()))};});console.log(metrics);assert(metrics.rootWidth>=8,'Root must remain visible after fit');
+  await page.getByRole('combobox',{name:'Node kind filter'}).selectOption('Class');await page.getByRole('button',{name:'اعمال عمق و فیلتر / بارگذاری',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.graph-canvas')._cyreg.cy.nodes().length===1);
+  await page.getByRole('combobox',{name:'Node kind filter'}).selectOption('');await page.getByRole('button',{name:'اعمال عمق و فیلتر / بارگذاری',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.graph-canvas')._cyreg.cy.nodes().length===80);
   const overflow=await page.locator('.graph-actions').evaluate(el=>{const frame=el.getBoundingClientRect();return [...el.children].some(c=>c.getBoundingClientRect().right>frame.right+1||c.getBoundingClientRect().left<frame.left-1);});assert(!overflow,'Toolbar must wrap within the graph width');
+  await page.getByRole('button',{name:'تنظیمات و قابلیت‌ها',exact:true}).click();await page.getByRole('button',{name:'تست مدل با تنظیمات ذخیره‌شده',exact:true}).click();await page.getByText(/LLM_HTTP_401/).waitFor();
   assert.deepEqual(errors,[],'No browser runtime errors');
   console.log('PASS: search-to-graph, quiet labels, hover tooltip/focus, retained selection, reset, label toggle, layouts, expanded view and Escape.');
  }finally{if(browser)await browser.close();server.kill();}

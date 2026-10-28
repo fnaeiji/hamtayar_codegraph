@@ -41,8 +41,8 @@ def node_row(node,project,index,prefix):
             'name':str(props.get('name',labels[0] if labels else 'Entity')),
             'kind':next((label for label in labels if label in DECLARATIONS),labels[0] if labels else 'Entity'),
             'path':path[len(prefix):] if path.startswith(prefix) else '',
-            'line':int(props.get('line_number',props.get('start_line',1)) or 1),
-            'end':int(props.get('end_line',props.get('line_number',1)) or 1),
+            'line':int(props.get('line_number',props.get('start_line',props.get('function_line_number',1))) or 1),
+            'end':int(props.get('end_line',props.get('line_number',props.get('function_line_number',1))) or 1),
             'properties':json.dumps(props,default=str)}
 
 NODE_WRITE='UNWIND $rows AS row MERGE (n:HamtayarEntity {id:row.id}) SET n += row'
@@ -113,7 +113,13 @@ def publish(project,index,workspace,selected_paths=None,cancelled=None,log=None)
                     write_edges();log(f'Publishing relationships: {processed_edges:,}');edges=[];extras={};size=0
             write_edges()
         check()
+        from .csharp_semantics import enrich
+        semantic_summary=enrich(destination,project,index,workspace,selected_paths,cancelled,log)
+        log('C# semantic enrichment: '+json.dumps(semantic_summary))
+        check()
         counts=destination.run('MATCH (n:HamtayarEntity) WHERE n.index=$index RETURN count(n) AS total',index=index)[0]
         relations=destination.run('MATCH (a:HamtayarEntity)-[r:HAMTAYAR_LINK]->(b:HamtayarEntity) WHERE a.index=$index AND b.index=$index RETURN count(r) AS total',index=index)[0]
+        if counts['total']>options['GRAPH_MAX_NODES'] or relations['total']>options['GRAPH_MAX_RELATIONSHIPS']:
+            raise ValueError('Enriched graph exceeds GRAPH_MAX_NODES or GRAPH_MAX_RELATIONSHIPS; increase publication limits and retry. Partial output remains inactive.')
         log(f'Graph publication complete: {counts["total"]:,} nodes; {relations["total"]:,} relationships.')
         return {'nodes':counts['total'],'relationships':relations['total']}

@@ -61,14 +61,18 @@ def publish(project, index, workspace, selected_paths=None, cancelled=None, log=
 def search(index, term='', limit=100):
     return query('MATCH (n:HamtayarEntity) WHERE n.index=$index AND (toLower(n.name) CONTAINS toLower($term) OR toLower(n.path) CONTAINS toLower($term)) RETURN properties(n) AS node ORDER BY n.path,n.line LIMIT $limit', index=index,term=term,limit=limit)
 
-def neighborhood(index, symbol=None, relation=None, depth=1, direction='both', max_nodes=200, max_edges=300):
+def neighborhood(index, symbol=None, relation=None, depth=1, direction='both', max_nodes=200, max_edges=300, kinds=None, hide_injected_fields=True):
     """Bounded breadth-first expansion, never an unbounded variable-length path."""
     if not 1<=depth<=5 or direction not in ('both','outgoing','incoming') or not 1<=max_nodes<=500 or not 1<=max_edges<=1000:
         raise ValueError('Graph bounds: depth 1..5, nodes 1..500, edges 1..1000; direction both/outgoing/incoming')
     if relation is not None and len(relation)>100: raise ValueError('Relationship filter is too long')
+    kinds_set={part.strip() for part in (kinds or '').split(',') if part.strip()}
+    if len(kinds_set)>12 or any(len(k)>40 or not k.replace('_','').isalnum() for k in kinds_set):raise ValueError('Invalid node kind filter')
+    presets={'@inheritance':['INHERITS','INHERITS_FROM','EXTENDS','IMPLEMENTS','BASE_TYPE'],'@services':['INJECTS','USES_SERVICE','DECLARED_TYPE']}
+    relation_kinds=presets.get(relation,[relation] if relation else [])
     nodes={};edges={};truncated=False;reasons=[];expanded=0
     if symbol:
-        seed=query('MATCH (n:HamtayarEntity {id:$symbol}) WHERE n.index=$index RETURN n{.id,.name,.kind,.path,.line,.end,.index} AS node LIMIT 1',symbol=symbol,index=index)
+        seed=query('MATCH (n:HamtayarEntity {id:$symbol}) WHERE n.index=$index RETURN n{.id,.name,.kind,.path,.line,.end,.index,.semantic_role,.declared_type,.resolution,.field_names} AS node LIMIT 1',symbol=symbol,index=index)
         if not seed: raise ValueError('Selected symbol is not in the active project index; search again')
         nodes[symbol]=seed[0]['node'];frontier=[symbol]
     else:
@@ -86,9 +90,10 @@ def neighborhood(index, symbol=None, relation=None, depth=1, direction='both', m
                   'WITH startNode(r) AS a, endNode(r) AS b,r ')
         else:
             text='MATCH (a:HamtayarEntity)-[r:HAMTAYAR_LINK]->(b:HamtayarEntity) '
-        rows=query(text+'WHERE a.index=$index AND b.index=$index AND ($relation IS NULL OR r.kind=$relation) '
-            'RETURN a{.id,.name,.kind,.path,.line,.end,.index} AS a, b{.id,.name,.kind,.path,.line,.end,.index} AS b,r.kind AS kind LIMIT $limit',
-            index=index,relation=relation,frontier=frontier,limit=remaining+1)
+        rows=query(text+'WHERE a.index=$index AND b.index=$index AND ($relation IS NULL OR r.kind IN $relation_kinds) '
+            'AND ($hide_fields=false OR (coalesce(a.semantic_role,"")<>"injected_field" AND coalesce(b.semantic_role,"")<>"injected_field")) '
+            'RETURN a{.id,.name,.kind,.path,.line,.end,.index,.semantic_role,.declared_type,.resolution,.field_names} AS a, b{.id,.name,.kind,.path,.line,.end,.index,.semantic_role,.declared_type,.resolution,.field_names} AS b,r.kind AS kind,r.declared_type AS declared_type,r.origin AS origin,r.evidence_path AS evidence_path,r.line AS evidence_line LIMIT $limit',
+            index=index,relation=relation,relation_kinds=relation_kinds,hide_fields=hide_injected_fields,frontier=frontier,limit=remaining+1)
         if len(rows)>remaining: truncated=True;reasons.append('edge_limit')
         next_frontier=[]
         for row in rows[:remaining]:
@@ -98,11 +103,15 @@ def neighborhood(index, symbol=None, relation=None, depth=1, direction='both', m
             if len(nodes)+len(additions)>max_nodes:
                 truncated=True;reasons.append('node_limit');continue
             nodes.update(additions);next_frontier.extend(additions)
-            edges[key]={'source':a['id'],'target':b['id'],'kind':row['kind']}
+            edges[key]={'source':a['id'],'target':b['id'],'kind':row['kind'],**{k:row[k] for k in ('declared_type','origin','evidence_path','evidence_line') if row.get(k) is not None}}
         expanded=hop+1
         if truncated:break
         frontier=next_frontier
-    return {'nodes':list(nodes.values()),'edges':list(edges.values()),'truncated':truncated,
+    displayed={id:n for id,n in nodes.items() if (not kinds_set or n.get('kind') in kinds_set) and (not hide_injected_fields or n.get('semantic_role')!='injected_field')}
+    displayed_edges=[e for e in edges.values() if e['source'] in displayed and e['target'] in displayed]
+    return {'nodes':list(displayed.values()),'edges':displayed_edges,'truncated':truncated,
+            'kinds':sorted(kinds_set),'hidden_nodes':len(nodes)-len(displayed),'root_filtered':bool(symbol and symbol not in displayed),
+            'hide_injected_fields':hide_injected_fields,
             'truncation_reasons':sorted(set(reasons)),'root':symbol,'depth':depth,
             'expanded_depth':expanded,'direction':direction,'relation':relation,
             'limits':{'nodes':max_nodes,'edges':max_edges},'mode':'neighborhood' if symbol else 'overview'}
@@ -111,3 +120,7 @@ def neighborhood(index, symbol=None, relation=None, depth=1, direction='both', m
 def relationship_types(index):
     return query('MATCH (a:HamtayarEntity)-[r:HAMTAYAR_LINK]->(b:HamtayarEntity) '
                  'WHERE a.index=$index AND b.index=$index RETURN r.kind AS kind,count(r) AS total ORDER BY total DESC',index=index)
+
+
+def node_kinds(index):
+    return query('MATCH (n:HamtayarEntity) WHERE n.index=$index RETURN n.kind AS kind,count(n) AS total ORDER BY total DESC',index=index)

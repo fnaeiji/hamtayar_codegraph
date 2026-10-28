@@ -17,7 +17,7 @@ def topology(monkeypatch):
         frontier=params.get('frontier',[]);rows=[]
         for a,b,kind in edges:
             if nodes[a]['index']!=params['index'] or nodes[b]['index']!=params['index']:continue
-            if params.get('relation') and params['relation']!=kind:continue
+            if params.get('relation') and kind not in params['relation_kinds']:continue
             if '(s)-[r:HAMTAYAR_LINK]-(t' in q: match=a in frontier or b in frontier
             elif '(s)-[r:HAMTAYAR_LINK]->(t' in q:match=a in frontier
             elif '(s)<-[r:HAMTAYAR_LINK]-(t' in q:match=b in frontier
@@ -68,3 +68,17 @@ def test_api_bounds_and_depth(topology):
         assert r.status_code==200 and len(r.json()['nodes'])==5
         assert client.get(url,params={'depth':6}).status_code==422
         assert client.get(url,params={'direction':'arbitrary'}).status_code==400
+
+
+def test_kind_filter_is_strict_without_inventing_links(topology):
+    result=graph.neighborhood('owned','c',depth=3,kinds='Class',direction='outgoing')
+    assert {n['id'] for n in result['nodes']}=={'c','b'}
+    assert result['edges']==[{'source':'c','target':'b','kind':'INHERITS'}]
+    assert result['hidden_nodes']>0
+    functions=graph.neighborhood('owned','c',depth=3,kinds='Function',direction='outgoing')
+    assert functions['root_filtered'] and all(n['kind']=='Function' for n in functions['nodes'])
+
+
+def test_inheritance_preset(topology):
+    result=graph.neighborhood('owned','c',relation='@inheritance',direction='outgoing')
+    assert {n['id'] for n in result['nodes']}=={'c','b'}
