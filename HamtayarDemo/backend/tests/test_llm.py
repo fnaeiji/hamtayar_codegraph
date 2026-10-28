@@ -73,3 +73,46 @@ def test_chat_max_completion_tokens(model):
         return httpx.Response(200,json={'choices':[{'message':{'content':'OK'}}]})
     client(model,handle)
     assert asyncio.run(llm.connection_test())['ok']
+
+@pytest.mark.parametrize('mode,expected',[('bearer',{'authorization':'Bearer example-key'}),('api-key',{'api-key':'example-key'}),('none',{})])
+def test_auth_modes_and_pasted_bearer_prefix(model,mode,expected):
+    model.setitem(config.values,'LLM_AUTH_MODE',mode)
+    model.setitem(config.values,'LLM_API_KEY','  Bearer example-key  ')
+    def handle(request):
+        assert {k:v for k,v in request.headers.items() if k in ('authorization','api-key')}==expected
+        return httpx.Response(200,json={'choices':[{'message':{'content':'OK'}}]})
+    client(model,handle)
+    result=asyncio.run(llm.connection_test())
+    assert result['auth_mode']==mode and result['key_sent']==(mode!='none')
+    assert 'example-key' not in str(result)
+
+def test_bad_key_returns_safe_error(model):
+    model.setitem(config.values,'LLM_API_KEY','invalid key')
+    result=asyncio.run(llm.connection_test())
+    assert result['code']=='LLM_INVALID_KEY'
+    assert 'invalid key' not in str(result)
+
+def test_clear_key_and_blank_preserves_key(tmp_path,monkeypatch):
+    import app.main as api
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(config,'ROOT',tmp_path)
+    monkeypatch.setattr(config,'values',{'LLM_API_KEY':'original-key'})
+    monkeypatch.setattr(api.store,'all_projects',lambda:[])
+    with TestClient(api.app) as client:
+        r=client.post('/api/settings',json={'values':{'LLM_API_KEY':''}})
+        assert r.json()['secrets_present']['LLM_API_KEY']
+        assert 'original-key' not in r.text
+        r=client.post('/api/settings',json={'values':{},'clear_llm_key':True})
+        assert not r.json()['secrets_present']['LLM_API_KEY']
+        assert not config.setting('LLM_API_KEY')
+        from dotenv import dotenv_values
+        assert dotenv_values(tmp_path/'.env')['LLM_API_KEY']==''
+
+def test_report_uses_active_index(monkeypatch):
+    import app.main as api
+    monkeypatch.setattr(api,'selected',lambda pid:({},'active-generation'))
+    def report(index):
+        assert index=='active-generation'
+        return [{'kind':'INHERITS','total':7}]
+    monkeypatch.setattr(api.graph,'relationship_types',report)
+    assert api.query_template('project',api.QueryRequest(template='relation_stats'))==[{'kind':'INHERITS','total':7}]

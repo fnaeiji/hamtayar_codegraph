@@ -127,6 +127,7 @@ def query_template(pid:str,body:QueryRequest):
     _,idx=selected(pid)
     if body.template=='symbols':return graph.search(idx,body.term)
     if body.template=='relationships':return graph.neighborhood(idx)
+    if body.template=='relation_stats':return graph.relationship_types(idx)
     if body.template=='stats':return graph.query('MATCH (n:HamtayarEntity) WHERE n.index=$index RETURN n.kind AS kind,count(*) AS total',index=idx)
     raise ValueError('Unsupported query. Only symbols, relationships and stats templates are allowed; arbitrary Cypher is disabled.')
 class ContextRequest(BaseModel):
@@ -168,15 +169,16 @@ async def model_test():
     from .llm import connection_test
     return await connection_test()
 
-SETTING_KEYS=('LLM_TOKEN_PARAMETER','LLM_API_STYLE','LLM_TIMEOUT_SECONDS','GRAPH_MAX_NODES','GRAPH_MAX_RELATIONSHIPS','GRAPH_PUBLISH_BATCH_SIZE','GRAPH_QUERY_TIMEOUT_SECONDS','INDEX_MAX_FILE_MB','INDEX_EXCLUDE_GLOBS','INDEX_PARALLEL_WORKERS','INDEX_TIMEOUT_SECONDS','RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
+SETTING_KEYS=('LLM_AUTH_MODE','LLM_TOKEN_PARAMETER','LLM_API_STYLE','LLM_TIMEOUT_SECONDS','GRAPH_MAX_NODES','GRAPH_MAX_RELATIONSHIPS','GRAPH_PUBLISH_BATCH_SIZE','GRAPH_QUERY_TIMEOUT_SECONDS','INDEX_MAX_FILE_MB','INDEX_EXCLUDE_GLOBS','INDEX_PARALLEL_WORKERS','INDEX_TIMEOUT_SECONDS','RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
 SECRET_KEYS=('NEO4J_PASSWORD','STAGING_NEO4J_PASSWORD','LLM_API_KEY')
 @app.get('/api/settings')
 def settings_get():
     from .config import CGC
-    defaults={'LLM_TOKEN_PARAMETER':'max_tokens','LLM_API_STYLE':'chat_completions','LLM_TIMEOUT_SECONDS':'90','GRAPH_MAX_NODES':'1000000','GRAPH_MAX_RELATIONSHIPS':'5000000','GRAPH_PUBLISH_BATCH_SIZE':'500','GRAPH_QUERY_TIMEOUT_SECONDS':'1800','INDEX_MAX_FILE_MB':'2','INDEX_EXCLUDE_GLOBS':'*.min.js,*.min.css,*.map','INDEX_PARALLEL_WORKERS':'2','INDEX_TIMEOUT_SECONDS':'7200'}
+    defaults={'LLM_BASE_URL':'https://api.openai.com/v1','LLM_AUTH_MODE':'bearer','LLM_TOKEN_PARAMETER':'max_tokens','LLM_API_STYLE':'chat_completions','LLM_TIMEOUT_SECONDS':'90','GRAPH_MAX_NODES':'1000000','GRAPH_MAX_RELATIONSHIPS':'5000000','GRAPH_PUBLISH_BATCH_SIZE':'500','GRAPH_QUERY_TIMEOUT_SECONDS':'1800','INDEX_MAX_FILE_MB':'2','INDEX_EXCLUDE_GLOBS':'*.min.js,*.min.css,*.map','INDEX_PARALLEL_WORKERS':'2','INDEX_TIMEOUT_SECONDS':'7200'}
     return {'values':{k:setting(k,CGC if k=='CGC_EXECUTABLE' else defaults.get(k,'')) for k in SETTING_KEYS},'secrets_present':{k:bool(setting(k)) for k in SECRET_KEYS},'storage':'Local .env file outside Git; restart is not needed for connection settings'}
 class SettingsRequest(BaseModel):
     values:dict[str,str]
+    clear_llm_key:bool=False
 @app.post('/api/settings')
 def settings_save(body:SettingsRequest):
     from . import config
@@ -184,6 +186,10 @@ def settings_save(body:SettingsRequest):
     if any(p['status'] in ('archive_queued','extracting','queued','indexing','validating_graph') for p in store.all_projects()):
         raise ValueError('Wait for indexing to finish before changing connections')
     if set(body.values)-set(SETTING_KEYS+SECRET_KEYS):raise ValueError('Unknown setting')
+    for key,value in body.values.items():
+        if len(value)>4000 or '\n' in value or '\r' in value:raise ValueError('Invalid setting')
+    if body.values.get('LLM_AUTH_MODE','bearer') not in ('bearer','api-key','none'):raise ValueError('Invalid LLM authentication mode')
+    if body.clear_llm_key and body.values.get('LLM_API_KEY','').strip():raise ValueError('Choose either replace or clear API key')
     path=config.ROOT/'.env'
     path.touch(mode=0o600,exist_ok=True)
     for key,value in body.values.items():
@@ -194,6 +200,9 @@ def settings_save(body:SettingsRequest):
         if key=='CGC_EXECUTABLE':
             from . import cgc
             cgc.CGC=value
+    if body.clear_llm_key:
+        set_key(str(path),'LLM_API_KEY','')
+        config.values['LLM_API_KEY']=''
     return settings_get()
 
 @app.get('/api/archives/capabilities')
