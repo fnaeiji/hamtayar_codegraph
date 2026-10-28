@@ -44,20 +44,13 @@ def test_monitor_tracks_active_and_slow_operations_on_failure():
     assert status['slowest'][0]['path']=='src/example.py'
 
 
-def test_publish_scopes_to_current_selected_paths(monkeypatch,tmp_path):
-    calls=[];root=tmp_path.as_posix()
-    def query(q,staging=False,**params):
-        calls.append((q,params))
-        if 'properties(n) AS props' in q:
-            return [{'id':'1','labels':['Function'],'props':{'name':'f','path':root+'/src/a.py'}}]
-        return []
-    monkeypatch.setattr(graph,'query',query)
+def test_publish_scopes_to_current_selected_paths(publication_db,tmp_path):
+    root=tmp_path.as_posix()
     graph.publish('p','v',tmp_path,selected_paths=[root+'/src/a.py'])
-    q,params=calls[0]
+    q,params=publication_db.calls[0]
     assert 'n.path IN $paths' in q and params['scoped']
     assert root+'/src/a.py' in params['paths'] and root+'/src' in params['paths']
     assert root+'/vendor.js' not in params['paths']
-
 
 def test_preview_and_report_keep_responses_bounded(monkeypatch,tmp_path):
     import app.main as api

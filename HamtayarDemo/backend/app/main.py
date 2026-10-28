@@ -157,12 +157,12 @@ async def chat(pid:str,body:ContextRequest):
         return {'context':pack,'answer':answer,'citations':sorted(cited)}
     except (httpx.HTTPError,KeyError,TypeError):return {'context':pack,'answer':None,'error':'Model request failed; retrieved evidence is still available'}
 
-SETTING_KEYS=('INDEX_MAX_FILE_MB','INDEX_EXCLUDE_GLOBS','INDEX_PARALLEL_WORKERS','INDEX_TIMEOUT_SECONDS','RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
+SETTING_KEYS=('GRAPH_MAX_NODES','GRAPH_MAX_RELATIONSHIPS','GRAPH_PUBLISH_BATCH_SIZE','GRAPH_QUERY_TIMEOUT_SECONDS','INDEX_MAX_FILE_MB','INDEX_EXCLUDE_GLOBS','INDEX_PARALLEL_WORKERS','INDEX_TIMEOUT_SECONDS','RAR_UNRAR_TOOL','RAR_7ZIP_TOOL','CGC_EXECUTABLE','NEO4J_URI','NEO4J_USERNAME','NEO4J_DATABASE','STAGING_NEO4J_URI','STAGING_NEO4J_USERNAME','STAGING_NEO4J_DATABASE','LLM_BASE_URL','LLM_MODEL')
 SECRET_KEYS=('NEO4J_PASSWORD','STAGING_NEO4J_PASSWORD','LLM_API_KEY')
 @app.get('/api/settings')
 def settings_get():
     from .config import CGC
-    defaults={'INDEX_MAX_FILE_MB':'2','INDEX_EXCLUDE_GLOBS':'*.min.js,*.min.css,*.map','INDEX_PARALLEL_WORKERS':'2','INDEX_TIMEOUT_SECONDS':'7200'}
+    defaults={'GRAPH_MAX_NODES':'1000000','GRAPH_MAX_RELATIONSHIPS':'5000000','GRAPH_PUBLISH_BATCH_SIZE':'500','GRAPH_QUERY_TIMEOUT_SECONDS':'1800','INDEX_MAX_FILE_MB':'2','INDEX_EXCLUDE_GLOBS':'*.min.js,*.min.css,*.map','INDEX_PARALLEL_WORKERS':'2','INDEX_TIMEOUT_SECONDS':'7200'}
     return {'values':{k:setting(k,CGC if k=='CGC_EXECUTABLE' else defaults.get(k,'')) for k in SETTING_KEYS},'secrets_present':{k:bool(setting(k)) for k in SECRET_KEYS},'storage':'Local .env file outside Git; restart is not needed for connection settings'}
 class SettingsRequest(BaseModel):
     values:dict[str,str]
@@ -223,7 +223,7 @@ def index_preview(pid: str):
 
 @app.get('/api/projects/{pid}/index-report')
 def index_report(pid: str):
-    p=store.get(pid); job=p.get('job')
+    p=store.get(pid); job=p.get('completed_cgc_job') or p.get('job')
     if not job or not (RUNTIME/'cgc'/job/'report.json').is_file():
         return {'available':False,'note':'No report yet; check processing logs.'}
     report=json.loads((RUNTIME/'cgc'/job/'report.json').read_text(encoding='utf-8'))
@@ -234,3 +234,8 @@ def index_report(pid: str):
     return {'available':True,**report,'job_status':p['status'],'selected':report.get('selected',[])[:20],
             'selected_count':len(report.get('selected',[])), 'skipped':report.get('skipped',[])[:100],
             'skipped_count':len(report.get('skipped',[]))}
+
+@app.post('/api/projects/{pid}/publish')
+def retry_publication(pid:str):
+    jobs.submit(pid,publish_only=True)
+    return public_project(store.get(pid))

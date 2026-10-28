@@ -1,5 +1,6 @@
 import threading
 import time
+import json
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 from . import archive, graph, store
@@ -17,17 +18,21 @@ class Jobs:
         for p in store.all_projects():
             if p['status'] in ('archive_queued','extracting','queued','indexing','validating_graph'):
                 store.update(p['id'],status='interrupted',error='Application stopped before publication')
-    def submit(self,pid):
+    def submit(self,pid,publish_only=False):
         with self.lock:
             p=store.get(pid)
             if p['status'] in ('archive_queued','extracting','queued','indexing','validating_graph'):
                 raise ValueError('This project already has a running job')
             if not p.get('files') or p['status']=='extraction_failed':
                 raise ValueError('Wait for successful archive extraction before indexing')
+            report_job=None
+            if publish_only:
+                report_job=p.get('completed_cgc_job') or p.get('job')
+                self.completed_report(pid,report_job)
             event=threading.Event();self.cancelled[pid]=event
             job=uuid4().hex
-            store.update(pid,status='queued',job=job,logs=[],error=None,started_at=store.now())
-            self.pool.submit(self.run,pid,job,event)
+            store.update(pid,status='queued',job=job,completed_cgc_job=report_job,logs=[],error=None,started_at=store.now())
+            self.pool.submit(self.run,pid,job,event,report_job)
     def extract(self, pid):
         with self.lock:
             if pid in self.cancelled:
@@ -70,7 +75,18 @@ class Jobs:
             if pid not in self.cancelled:
                 raise ValueError('No running job')
             self.cancelled[pid].set()
-    def run(self,pid,job,event):
+    def completed_report(self,pid,job):
+        path=RUNTIME/'cgc'/str(job)/'report.json'
+        if not job or not path.is_file(): raise ValueError('No completed CGC report available; start indexing first')
+        report=json.loads(path.read_text(encoding='utf-8'))
+        if report.get('outcome')!='completed' or not report.get('selected') or report.get('unparsed') or (report.get('summary') or {}).get('failed_files'):
+            raise ValueError('CGC analysis did not complete successfully; run indexing before publication')
+        root=(RUNTIME/'workspaces'/pid/'source').resolve()
+        from pathlib import Path
+        if any(not Path(p).resolve().is_relative_to(root) for p in report['selected']):
+            raise ValueError('CGC report does not belong to this project')
+        return report
+    def run(self,pid,job,event,report_job=None):
         buffer=[]; buffer_lock=threading.RLock(); last_flush=time.monotonic()
         def flush():
             nonlocal last_flush
@@ -100,14 +116,19 @@ class Jobs:
                 log(f'Checking Neo4j {name} connection...')
                 graph.query('RETURN 1 AS ok',staging)
                 log(f'Neo4j {name}: connection OK')
-            store.update(pid,status='indexing')
             workspace=RUNTIME/'workspaces'/pid/'source'
-            report=CGCAdapter().index(workspace,job,event,log)
+            if report_job:
+                log('Reusing completed CGC analysis; no parsing or re-indexing.')
+                report=self.completed_report(pid,report_job)
+            else:
+                store.update(pid,status='indexing')
+                report=CGCAdapter().index(workspace,job,event,log)
+            store.update(pid,completed_cgc_job=report_job or job)
             if event.is_set():
                 raise ValueError('Cancelled')
             store.update(pid,status='validating_graph')
             log('CGC completed. Validating and publishing selected graph to destination...')
-            counts=graph.publish(pid,job,workspace,selected_paths=report['selected'])
+            counts=graph.publish(pid,job,workspace,selected_paths=report['selected'],cancelled=event,log=log)
             if event.is_set():
                 raise ValueError('Cancelled')
             store.update(pid,status='ready',active_index=job,counts=counts,index_coverage={'selected_files':len(report['selected']),'skipped_files':len(report['skipped'])},finished_at=store.now())

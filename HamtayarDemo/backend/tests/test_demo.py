@@ -65,18 +65,10 @@ def test_graph_queries_scope_both_endpoints(monkeypatch):
     assert 'a.index=$index AND b.index=$index' in calls[0][0]
     assert calls[0][1]['index']=='my-index'
 
-def test_publish_scopes_identity_and_preserves_legacy(monkeypatch,tmp_path):
-    calls=[]
-    root=tmp_path.resolve().as_posix()
-    def fake(q,staging=False,**params):
-        calls.append((q,params))
-        if 'properties(n) AS props' in q:return [{'id':'42','labels':['Function'],'props':{'name':'same','path':root+'/a.py','line_number':1,'end_line':2}}]
-        return []
-    monkeypatch.setattr(graph,'query',fake)
+def test_publish_scopes_identity_and_preserves_legacy(publication_db,tmp_path):
     graph.publish('A','v1',tmp_path);graph.publish('B','v2',tmp_path)
-    written=[p['rows'][0] for q,p in calls if 'MERGE (n:HamtayarEntity' in q]
-    assert written[0]['id']!=written[1]['id']
-    assert all('DELETE' not in q for q,p in calls)
+    assert set(publication_db.written['v1']).isdisjoint(publication_db.written['v2'])
+    assert all('DELETE' not in q for q,p in publication_db.calls)
 
 def test_settings_do_not_return_secrets(monkeypatch,tmp_path):
     from app import config
@@ -94,10 +86,10 @@ def test_binary_and_dependencies_excluded(tmp_path):
     files=archive.unpack(path,tmp_path/'extracted')
     assert sum(not f['excluded'] for f in files)==1
 
-def test_graph_publish_requires_declarations(monkeypatch,tmp_path):
+def test_graph_publish_requires_declarations(publication_db,tmp_path):
     import pytest
-    monkeypatch.setattr(graph,'query',lambda *a,**k:[])
-    with pytest.raises(ValueError):graph.publish('project','attempt',tmp_path)
+    publication_db.declarations=0
+    with pytest.raises(ValueError,match='no usable code declarations'):graph.publish('project','attempt',tmp_path)
 
 def test_context_without_llm(monkeypatch):
     with TestClient(app) as c:

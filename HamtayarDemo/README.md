@@ -103,7 +103,7 @@ MAX_ARCHIVE_FILES=250000
 MAX_SOURCE_FILE_MB=25
 ```
 
-Restart the backend after changing limits. Limits are finite and configurable, not a benchmark promise for arbitrary repository sizes. Available disk and RAM still constrain workloads. Remove dependency/build directories from archives when practical. Graph publication still has its documented 50000-node/100000-edge demo caps independently of archive upload limits.
+Restart the backend after changing limits. Limits are finite and configurable, not a benchmark promise for arbitrary repository sizes. Available disk and RAM still constrain workloads. Remove dependency/build directories from archives when practical. Graph publication has separate configurable ceilings; see the streamed publication section below.
 
 Project polling returns at most 500 manifest entries and 200 log lines. The source explorer pages/filter files through GET /api/projects/{id}/files. Full metadata stays server-side. HTTP 413 reports the configured upload cap. Over-limit chunked transfers are stopped and their partial workspace is removed.
 
@@ -144,6 +144,25 @@ Settings exposes:
 
 If your app ships third-party Stimulsoft bundles, optionally add `stimulsoft*.js` after reviewing the preview. Filenames alone do not prove the cause of a stall. Large first-party files may also be excluded by the size policy. Excluded files remain viewable as source but are not analyzed in the graph; context coverage discloses omissions. Publication filters old staging nodes against this attempt's selected paths so prior runs cannot reintroduce excluded files.
 
-Logs include timestamps, CGC INFO diagnostics, and a heartbeat every 10 seconds with active stages/files and elapsed time. Parsing, pre-scan, writes and call-resolution timings are recorded. Heartbeat is process activity, not guaranteed progress. Buffered log updates avoid rewriting the large archive manifest for every line. Missing parsers and reported parse/write failures prevent publication. Independent 50,000-node / 100,000-edge publication limits remain: this is not an arbitrary-large-repository scalability guarantee.
+Logs include timestamps, CGC INFO diagnostics, and a heartbeat every 10 seconds with active stages/files and elapsed time. Parsing, pre-scan, writes and call-resolution timings are recorded. Heartbeat is process activity, not guaranteed progress. Buffered log updates avoid rewriting the large archive manifest for every line. Missing parsers and reported parse/write failures prevent publication. The former fixed publication limits are superseded by the streamed publication section below; large-project performance still depends on resources.
 
 For an existing upload: cancel the active index, pull `codex/hamtayar-demo`, restart the demo, refresh the browser, review preview/settings, then start indexing on the same project. No re-upload is required. Changes affect the next attempt. Docker memory configuration remains separate.
+
+## Streamed graph publication (replaces the fixed 50k/100k caps)
+
+CGC completion and publication are separate stages. Publication now reads lazy Neo4j streams (fetch size 500) and writes bounded batches, instead of loading the whole graph and relationship list into Python. Driver connections are reused throughout the transfer. Destination lookup indexes on HamtayarEntity.id and .index are created before writing; the Neo4j user needs index creation permissions. The UI graph remains limited to 300 relationships per response.
+
+Settings / local .env:
+
+```dotenv
+GRAPH_MAX_NODES=1000000
+GRAPH_MAX_RELATIONSHIPS=5000000
+GRAPH_PUBLISH_BATCH_SIZE=500
+GRAPH_QUERY_TIMEOUT_SECONDS=1800
+```
+
+These are publication ceilings, independent of extraction and CGC scope. Above-limit output fails with the count/setting; it is never silently truncated or made active. The node ceiling includes shared pathless CGC entities. The relationship ceiling counts source relationships visited; canonical duplicate (source,target,kind) links collapse via MERGE, so final distinct relationship counts may be smaller. Approximate property-byte batching also flushes at 4 MiB; an individual larger property record still fits in its own batch. A streamed read has a finite query timeout and may require adjustment for very large transfers.
+
+Use **تلاش مجدد انتشار گراف، بدون ایندکس مجدد** on a project whose CGC analysis completed but publication failed. The backend validates the completed report belongs to the uploaded workspace and reuses its selected scope. It creates a fresh destination generation and activates it only after successful publication. The old active generation remains usable on failure/cancellation. This also works with completed reports from before this change. Changing the analysis scope requires a new index, not a publication retry.
+
+Progress logs report source node counts, transferred nodes and relationships. Failed partial generations remain inactive in Neo4j; this patch does not garbage-collect historical/partial generations. Publication cancellation is checked between records/batches; an in-flight database request must return or time out first. Keep staging unchanged during publication. All queries remain scoped to selected files/ancestors plus adjacent pathless entities, excluding other repositories' path-bearing nodes.
